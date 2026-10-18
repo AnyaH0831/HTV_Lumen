@@ -55,7 +55,7 @@ function initThree() {
   if (CARD_UI) panels.card = new Panel(CARD.w, CARD.h, CARD.ppm, CARD.alpha);       // translucent: the room stays visible behind it
   else { panels.status = new Panel(0.5, 0.36); panels.agent = new Panel(0.46, 0.36); panels.caption = new Panel(0.7, 0.14); }
   if (q.get("debug")) panels.debug = new Panel(0.5, 0.09);
-  if (MODE === "live") { panels.kazeButton = buttons.add(new CircleButton("I'M SAFE", () => kaze.checkin(), C.ok)); panels.kazeButton.mesh.visible = false; }
+  if (MODE === "live") { panels.kazeButton = buttons.add(new CircleButton("I'M SAFE", () => kaze.checkin().catch(e => { chat.note("KAZE: " + e.message); draw(); }), C.ok)); panels.kazeButton.mesh.visible = false; }
   for (const p of Object.values(panels)) scene.add(p.mesh);
   const B = (l, f, c) => { const b = buttons.add(new Button(l, f, c)); scene.add(b.mesh); return b; };
   if (CARD_UI) {                                       // controls appear under the card only when they apply
@@ -114,25 +114,32 @@ function kazeWatching() {
 function drawKazeHud() {
   if (!panels.kazeButton) return;
   const st = kaze.state?.state, on = kazeWatching(), canTap = st === "watching" || st === "checkin_due";
-  panels.kazeButton.enabled = on && canTap; panels.kazeButton.mesh.visible = on;
+  // Always visible in live mode: a check-in button you cannot find is worse than none. Without a watch a tap
+  // explains itself in the chat ("Pair this Quest with KAZE first"); alert states stay untappable (PIN only).
+  panels.kazeButton.enabled = on ? canTap : true; panels.kazeButton.mesh.visible = true;
   if (panels.safe) { panels.safe.set(false); panels.safe.mesh.visible = false; }
-  if (!on) return;
-  const remain = Math.max(0, Number(kaze.state.respond_within ?? kaze.state.alert_in ?? kaze.state.next_checkin_in ?? 0));
+  const remain = Math.max(0, Number(kaze.state?.respond_within ?? kaze.state?.alert_in ?? kaze.state?.next_checkin_in ?? 0));
   if (st !== kazeRing.state || remain > kazeRing.total) kazeRing = { state: st, total: Math.max(remain, 1) };
   const progress = Math.min(1, remain / kazeRing.total), secs = Math.max(0, Math.ceil(remain));
   const color = st === "alert_pending" || st === "alert_sent" ? C.bad : st === "checkin_due" ? C.warn : C.ok;
   panels.kazeButton.color = color;
   panels.kazeButton.draw((ctx, W, H) => {
-    const cx = W / 2, cy = H / 2, m = Math.min(W, H), ringR = m * 0.46, fillR = m * 0.32;
-    ctx.lineWidth = m * 0.055; ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.beginPath(); ctx.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress); ctx.stroke();
-    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy, fillR, 0, Math.PI * 2); ctx.fill();
+    const cx = W / 2, cy = H / 2, m = Math.min(W, H), TAU = Math.PI * 2;
+    const backR = m * 0.46, ringR = m * 0.38, ringW = m * 0.075, fillR = m * 0.26;   // solid body, thick ring, solid button
+    ctx.fillStyle = "rgba(14,26,36,0.90)"; ctx.beginPath(); ctx.arc(cx, cy, backR, 0, TAU); ctx.fill();
+    ctx.lineWidth = m * 0.030; ctx.strokeStyle = color; ctx.beginPath(); ctx.arc(cx, cy, backR - m * 0.015, 0, TAU); ctx.stroke();
+    ctx.lineWidth = ringW; ctx.strokeStyle = "rgba(243,239,230,0.22)"; ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, TAU); ctx.stroke();
+    if (progress > 0) { ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.beginPath(); ctx.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + TAU * progress); ctx.stroke(); }
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy, fillR, 0, TAU); ctx.fill();
+    ctx.lineWidth = m * 0.025; ctx.strokeStyle = "rgba(14,26,36,0.55)"; ctx.beginPath(); ctx.arc(cx, cy, fillR, 0, TAU); ctx.stroke();
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillStyle = C.ink; ctx.font = `800 ${m * 0.11}px system-ui`;
     const label = st === "alert_sent" ? "HELP" : "I'M SAFE";
     label.split(/\s+/).forEach((line, i, a) => ctx.fillText(line, cx, cy + (i - (a.length - 1) / 2) * m * 0.12));
-    ctx.fillStyle = color; ctx.font = `800 ${m * 0.08}px system-ui`;
-    if (st !== "alert_sent") ctx.fillText(String(secs), cx, cy - (fillR + ringR) / 2);
+    if (on && st !== "alert_sent") {                                               // countdown in the gap between button and ring
+      ctx.fillStyle = color; ctx.font = `800 ${m * 0.06}px system-ui`;
+      ctx.fillText(String(secs), cx, cy - (fillR + ringR - ringW / 2) / 2);
+    }
     ctx.textAlign = "left";
   }, "rgba(0,0,0,0)");
 }

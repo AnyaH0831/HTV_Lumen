@@ -47,7 +47,9 @@ export class CircleButton extends Panel {
   }
   render() {
     this.draw((ctx, W, H) => {
-      ctx.fillStyle = this.enabled ? this.color : C.line; ctx.beginPath(); ctx.arc(W / 2, H / 2, Math.min(W, H) * 0.32, 0, Math.PI * 2); ctx.fill();
+      const m = Math.min(W, H), r = m * 0.40;
+      ctx.fillStyle = this.enabled ? this.color : C.line; ctx.beginPath(); ctx.arc(W / 2, H / 2, r, 0, Math.PI * 2); ctx.fill();
+      ctx.lineWidth = m * 0.035; ctx.strokeStyle = "rgba(14,26,36,0.85)"; ctx.beginPath(); ctx.arc(W / 2, H / 2, r, 0, Math.PI * 2); ctx.stroke();
       ctx.fillStyle = this.enabled ? C.ink : C.dim; ctx.font = `800 ${H * 0.11}px ${FONT}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       String(this.label).split(/\s+/).forEach((line, i, a) => ctx.fillText(line, W / 2, H / 2 + (i - (a.length - 1) / 2) * H * 0.13));
     }, "rgba(0,0,0,0)");
