@@ -115,4 +115,20 @@ T.S.tokens = [{ gloss: "A", conf: 1 }, { gloss: "B", conf: 1 }, { gloss: "C", co
 T.net.h.notice({ text: "Please sign again, a little slower." }); run(1, 0, FAR); assert.ok(shown().includes("Please sign again"));
 for (let i = 0; i < 80; i++) T.net.h.caption({ text: "line " + i + " of a long conversation that wraps onto several lines of the card" });
 run(1, 0, FAR); assert.ok(texts.get(T.panels.card.canvas).every(t => t.y > -1 && t.y < 520), "all text inside the card");
+
+// 11. KAZE check-in: one circular I'M SAFE button, ring around it, beside the card
+assert.equal(T.panels.kazeButton.mesh.visible, false, "hidden until a watch starts");
+T.kaze.onState({ state: "watching", next_checkin_in: 42 }); run(1, 0, FAR);
+assert.equal(T.panels.kazeButton.mesh.visible, true);
+assert.equal(T.panels.card.mesh.visible, true, "conversation card stays up");
+assert.equal(T.panels.safe.mesh.visible, false, "the under-card duplicate stays off");
+assert.ok(Number.isFinite(T.panels.kazeButton.mesh.position.x) && Number.isFinite(T.panels.kazeButton.mesh.position.z), "button has a real world position");
+assert.ok(Math.abs(T.panels.kazeButton.mesh.position.x - card().position.x) > 0.15, "HUD sits beside the card, not on top of it");
+const kazeShown = () => texts.get(T.panels.kazeButton.canvas).map(t => t.t).join(" ");
+assert.ok(kazeShown().includes("I'M") && kazeShown().includes("SAFE") && kazeShown().includes("42"), kazeShown());
+T.kaze.onState({ state: "checkin_due", respond_within: 7 }); run(1, 0, FAR);
+assert.equal(T.panels.kazeButton.mesh.visible, true); assert.equal(T.panels.kazeButton.enabled, true);
+assert.ok(kazeShown().includes("SAFE") && kazeShown().includes("7"), kazeShown());
+T.kaze.onState({ state: "idle" }); T.draw();
+assert.equal(T.panels.kazeButton.mesh.visible, false);
 console.log("PASS ui card smoke"); process.exit(0);

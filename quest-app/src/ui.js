@@ -41,12 +41,15 @@ export class Button extends Panel {
 }
 
 export class CircleButton extends Panel {
-  constructor(label, onPress, color = C.ok) { super(0.16, 0.16, 1600, 1); this.label = label; this.onPress = onPress; this.color = color; this.hitRadius = 0.06; this.enabled = true; this.armed = true; this.flash = 0; this.render(); }
+  constructor(label, onPress, color = C.ok, size = 0.22) {
+    super(size, size, 1600, 1); this.label = label; this.onPress = onPress; this.color = color;
+    this.hitRadius = size * 0.36; this.enabled = true; this.armed = true; this.flash = 0; this.mesh.material.depthWrite = false; this.render();
+  }
   render() {
     this.draw((ctx, W, H) => {
-      ctx.fillStyle = this.enabled ? this.color : C.line; ctx.beginPath(); ctx.arc(W / 2, H / 2, Math.min(W, H) * 0.43, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = this.enabled ? C.ink : C.dim; ctx.font = `700 ${H * 0.18}px ${FONT}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(this.label, W / 2, H / 2 + 2);
+      ctx.fillStyle = this.enabled ? this.color : C.line; ctx.beginPath(); ctx.arc(W / 2, H / 2, Math.min(W, H) * 0.32, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = this.enabled ? C.ink : C.dim; ctx.font = `800 ${H * 0.11}px ${FONT}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      String(this.label).split(/\s+/).forEach((line, i, a) => ctx.fillText(line, W / 2, H / 2 + (i - (a.length - 1) / 2) * H * 0.13));
     }, "rgba(0,0,0,0)");
   }
   set(enabled) { if (enabled !== this.enabled) { this.enabled = enabled; this.render(); } }
@@ -60,7 +63,7 @@ export class Buttons {
       let d = 9; for (const t of tips) d = Math.min(d, t.distanceTo(b.mesh.position));
       b.mesh.scale.setScalar(d < 0.05 ? 1.08 : 1);
       if (d > 0.07) b.armed = true;
-      else if (d < b.hitRadius && b.armed && b.enabled && now - b.flash > 0.6) { b.armed = false; b.flash = now; b.onPress(); }
+      else if (b.mesh.visible && d < b.hitRadius && b.armed && b.enabled && now - b.flash > 0.6) { b.armed = false; b.flash = now; b.onPress(); }
     }
   }
 }

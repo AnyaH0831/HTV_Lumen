@@ -55,7 +55,7 @@ function initThree() {
   if (CARD_UI) panels.card = new Panel(CARD.w, CARD.h, CARD.ppm, CARD.alpha);       // translucent: the room stays visible behind it
   else { panels.status = new Panel(0.5, 0.36); panels.agent = new Panel(0.46, 0.36); panels.caption = new Panel(0.7, 0.14); }
   if (q.get("debug")) panels.debug = new Panel(0.5, 0.09);
-  if (MODE === "live") { panels.kaze = new Panel(0.44, 0.30, 2000, 0.96); panels.kazeButton = buttons.add(new CircleButton("I'M SAFE", () => kaze.checkin(), C.ok)); panels.kaze.mesh.visible = panels.kazeButton.mesh.visible = false; scene.add(panels.kaze); scene.add(panels.kazeButton); }
+  if (MODE === "live") { panels.kazeButton = buttons.add(new CircleButton("I'M SAFE", () => kaze.checkin(), C.ok)); panels.kazeButton.mesh.visible = false; }
   for (const p of Object.values(panels)) scene.add(p.mesh);
   const B = (l, f, c) => { const b = buttons.add(new Button(l, f, c)); scene.add(b.mesh); return b; };
   if (CARD_UI) {                                       // controls appear under the card only when they apply
@@ -82,12 +82,14 @@ function positionCard(anchor, yaw, eye) {                 // card + its button r
   const at = d => Bp.clone().addScaledVector(R, d);
   panels.cancel.place(at(-0.08), eye); panels.now.place(at(0.08), eye); panels.no.place(at(-0.08), eye); panels.yes.place(at(0.08), eye); panels.notsign.place(at(-0.24), eye);
   panels.safe.place(Bp, eye);
-  panels.kaze.place(P, eye); panels.kazeButton.place(P.clone().addScaledVector(pose.forward, -0.012), eye);
+  const K = P.clone().addScaledVector(R, (SIDE === "right" ? -1 : 1) * (CARD.w / 2 + 0.16));
+  panels.kazeButton.place(K, eye);
   if (panels.debug) panels.debug.place(P.clone().add(new THREE.Vector3(0, CARD.h / 2 + 0.06, 0)), eye);
 }
 function updateCard(time, hp, hq, left, right, tips) {   // every frame: hold still, re-centre only after a real change, fade while a hand is in front
   const dt = Math.min(0.1, Math.max(0.001, (time - (lastFrameT || time)) / 1000)); lastFrameT = time;
-  const eye = [hp.x, hp.y, hp.z], poking = tips.some(t => (cardP && t.distanceTo(cardP) < 0.32) || (btnP && t.distanceTo(btnP) < 0.16));
+  const eye = [hp.x, hp.y, hp.z], poking = tips.some(t => (cardP && t.distanceTo(cardP) < 0.32) || (btnP && t.distanceTo(btnP) < 0.16)
+    || (panels.kazeButton?.mesh.visible && t.distanceTo(panels.kazeButton.mesh.position) < 0.12));
   lazyAnchor(follow, eye, yawFromQuat(hq), dt, poking); positionCard(follow.pos, follow.yaw, new THREE.Vector3(hp.x, hp.y, hp.z));
   const pts = []; for (const h of [left, right]) if (h) for (const j of [0, 5, 8, 12, 16, 20]) pts.push([h[j * 3], h[j * 3 + 1], h[j * 3 + 2]]);
   cardOpacity += ((handFade(eye, cardPose(follow.pos, follow.yaw, SIDE), pts) ? 0.2 : 1) - cardOpacity) * Math.min(1, dt * 6);
@@ -101,18 +103,38 @@ function drawCardPanel() {
   for (const b of [panels.yes, panels.no]) { b.set(asking); b.mesh.visible = asking; }
   for (const b of [panels.cancel, panels.now]) { b.set(showNow); b.mesh.visible = showNow; }
   panels.notsign.set(showNot); panels.notsign.mesh.visible = showNot;
-  const due = kaze.state?.state === "checkin_due"; panels.safe.set(due); panels.safe.mesh.visible = due;
-  panels.card.mesh.visible = !due; panels.kaze.mesh.visible = panels.kazeButton.mesh.visible = due;
-  panels.safe.set(false); panels.safe.mesh.visible = false;
-  if (due) panels.kaze.draw((ctx, W, H) => {
-    const remaining = Math.max(0, Math.ceil(kaze.state.respond_within || 0)), total = 60, progress = Math.min(1, remaining / total);
-    const cx = W / 2, cy = H / 2 + 30, radius = Math.min(W, H) * 0.34;
-    ctx.textAlign = "center"; ctx.fillStyle = C.warn; ctx.font = "800 32px system-ui"; ctx.fillText("SAFETY CHECK-IN", cx, 22);
-    ctx.fillStyle = C.paper; ctx.font = "600 26px system-ui"; ctx.fillText("Are you safe?", cx, 64);
-    ctx.lineWidth = 14; ctx.strokeStyle = "rgba(255,255,255,0.18)"; ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = C.ok; ctx.lineCap = "round"; ctx.beginPath(); ctx.arc(cx, cy, radius, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress); ctx.stroke();
+  panels.card.mesh.visible = true;
+  drawKazeHud();
+}
+let kazeRing = { state: "", total: 1 };
+function kazeWatching() {
+  const st = kaze.state?.state;
+  return st === "watching" || st === "checkin_due" || st === "alert_pending" || st === "alert_sent";
+}
+function drawKazeHud() {
+  if (!panels.kazeButton) return;
+  const st = kaze.state?.state, on = kazeWatching(), canTap = st === "watching" || st === "checkin_due";
+  panels.kazeButton.enabled = on && canTap; panels.kazeButton.mesh.visible = on;
+  if (panels.safe) { panels.safe.set(false); panels.safe.mesh.visible = false; }
+  if (!on) return;
+  const remain = Math.max(0, Number(kaze.state.respond_within ?? kaze.state.alert_in ?? kaze.state.next_checkin_in ?? 0));
+  if (st !== kazeRing.state || remain > kazeRing.total) kazeRing = { state: st, total: Math.max(remain, 1) };
+  const progress = Math.min(1, remain / kazeRing.total), secs = Math.max(0, Math.ceil(remain));
+  const color = st === "alert_pending" || st === "alert_sent" ? C.bad : st === "checkin_due" ? C.warn : C.ok;
+  panels.kazeButton.color = color;
+  panels.kazeButton.draw((ctx, W, H) => {
+    const cx = W / 2, cy = H / 2, m = Math.min(W, H), ringR = m * 0.46, fillR = m * 0.32;
+    ctx.lineWidth = m * 0.055; ctx.strokeStyle = "rgba(255,255,255,0.22)"; ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.beginPath(); ctx.arc(cx, cy, ringR, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress); ctx.stroke();
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy, fillR, 0, Math.PI * 2); ctx.fill();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillStyle = C.ink; ctx.font = `800 ${m * 0.11}px system-ui`;
+    const label = st === "alert_sent" ? "HELP" : "I'M SAFE";
+    label.split(/\s+/).forEach((line, i, a) => ctx.fillText(line, cx, cy + (i - (a.length - 1) / 2) * m * 0.12));
+    ctx.fillStyle = color; ctx.font = `800 ${m * 0.08}px system-ui`;
+    if (st !== "alert_sent") ctx.fillText(String(secs), cx, cy - (fillR + ringR) / 2);
     ctx.textAlign = "left";
-  });
+  }, "rgba(0,0,0,0)");
 }
 function placeUI(head, quat) {                            // once, in front of the wearer, yaw only
   if (CARD_UI) { follow.yaw = yawFromQuat(quat); follow.pos = [head.x, head.y, head.z]; positionCard(follow.pos, follow.yaw, head); placed = true; headPos.copy(head); return; }
@@ -124,7 +146,8 @@ function placeUI(head, quat) {                            // once, in front of t
   if (panels.debug) panels.debug.place(at(0, -0.1), head);
   const row = (names, cx, dx) => names.forEach((n, i) => panels[n] && panels[n].place(at(cx + (i - (names.length - 1) / 2) * dx, -0.24), head));
   if (MODE === "live") { row(["confirm", "redo", "undo"], -0.56, 0.15); row(["send", "clear"], -0.56, 0.15); panels.send.mesh.position.y -= 0.09; panels.clear.mesh.position.y -= 0.09;
-                         row(["yes", "no"], 0.56, 0.17); }
+                         row(["yes", "no"], 0.56, 0.17);
+                         if (panels.kazeButton) panels.kazeButton.place(at(0.56, -0.24), head); }
   else { row(["discard", "skip"], -0.56, 0.17); panels.start.place(at(-0.56, -0.24), head); }
   placed = true; headPos.copy(head);
 }
@@ -132,7 +155,7 @@ function placeUI(head, quat) {                            // once, in front of t
 /* ---------- drawing ---------- */
 function bar(ctx, x, y, w, h, frac, color) { ctx.fillStyle = C.line; ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.fill(); ctx.fillStyle = color; ctx.beginPath(); ctx.roundRect(x, y, Math.max(h, w * frac), h, h / 2); ctx.fill(); }
 function draw() {
-  if (CARD_UI) return drawCardPanel();
+  if (CARD_UI) { drawCardPanel(); return; }
   const lat = clf.latency?.();
   panels.status.draw((ctx, W, H) => {
     ctx.textBaseline = "top"; ctx.fillStyle = C.dim; ctx.font = "500 26px system-ui";
@@ -184,6 +207,7 @@ function draw() {
                          panels.send.set(S.tokens.length > 0 && !S.busy); panels.clear.set(S.tokens.length > 0); panels.yes.set(!!S.confirm); panels.no.set(!!S.confirm); }
   else { const on = !S.intro; panels.start.set(S.intro); panels.start.mesh.visible = S.intro;
          panels.discard.set(on && !!S.pendingRec); panels.skip.set(on); panels.discard.mesh.visible = panels.skip.mesh.visible = on; }
+  drawKazeHud();
 }
 
 
@@ -423,7 +447,8 @@ async function enterXR() {
 
 kaze.onState = s => {
   kaze.state = s;
-  if (s.state !== kazeLastState) { kazeLastState = s.state; if (s.state === "checkin_due") chat.note("Safety check-in due. Tap I'm safe."); draw(); }
+  if (s.state !== kazeLastState) { kazeLastState = s.state; if (s.state === "checkin_due") chat.note("Safety check-in due. Tap I'm safe."); }
+  draw();
 };
 
 (async function main() {
@@ -449,4 +474,4 @@ kaze.onState = s => {
   log("Startup error: " + ((e && e.message) || e));
   const b = $("enter"); if (b) { b.disabled = false; b.onclick = enterXR; }
 });
-if (globalThis.__LUMEN_TEST__) Object.assign(globalThis.__LUMEN_TEST__, { S, draw, panels, buttons, onClip, chat, follow, net, clf, onFrame, tipDots });
+if (globalThis.__LUMEN_TEST__) Object.assign(globalThis.__LUMEN_TEST__, { S, draw, panels, buttons, onClip, chat, follow, net, clf, onFrame, tipDots, kaze });
