@@ -6,10 +6,10 @@ import { Net } from "./net.js";
 import { toRecord, buildPrompts, buildBackgroundPrompts, pickGroup } from "./recorder.js";
 import { HandSkeleton } from "./skeleton.js";
 import { STEPS, REST_MS, INTRO, currentStep, cardFor, cue } from "./coach.js";
-import { Panel, Button, CircleButton, Buttons, C, wrap } from "./ui.js";
+import { Panel, Button, CircleButton, Buttons, C, wrap } from "./ui.js?v=quest-checkin-20261018";
 import { route, mergeToken, DEDUPE_MS, TENT_MIN, BG_MAX } from "./assist.js";
 import { Chat, chipFor, drawCard, CARD, lazyAnchor, yawFromQuat, cardPose, handFade } from "./chat.js";
-import { KazeClient, kazeSettings } from "./kaze.js";
+import { KazeClient, kazeSettings } from "./kaze.js?v=quest-checkin-period-60s-20261018";
 
 const q = new URLSearchParams(location.search);
 const MODE = q.get("mode") === "record" ? "record" : "live";
@@ -86,6 +86,11 @@ function positionCard(anchor, yaw, eye) {                 // card + its button r
   panels.kazeButton.place(K, eye);
   if (panels.debug) panels.debug.place(P.clone().add(new THREE.Vector3(0, CARD.h / 2 + 0.06, 0)), eye);
 }
+function positionKazeCenter(hp, hq) {
+  if (!panels.kazeButton) return;
+  const eye = new THREE.Vector3(hp.x, hp.y, hp.z), forward = new THREE.Vector3(0, 0, -1).applyQuaternion(hq);
+  panels.kazeButton.place(eye.clone().addScaledVector(forward, CARD.dist), eye);
+}
 function updateCard(time, hp, hq, left, right, tips) {   // every frame: hold still, re-centre only after a real change, fade while a hand is in front
   const dt = Math.min(0.1, Math.max(0.001, (time - (lastFrameT || time)) / 1000)); lastFrameT = time;
   const eye = [hp.x, hp.y, hp.z], poking = tips.some(t => (cardP && t.distanceTo(cardP) < 0.32) || (btnP && t.distanceTo(btnP) < 0.16)
@@ -107,21 +112,27 @@ function drawCardPanel() {
   drawKazeHud();
 }
 let kazeRing = { state: "", total: 1 };
-function kazeWatching() {
-  const st = kaze.state?.state;
-  return st === "watching" || st === "checkin_due" || st === "alert_pending" || st === "alert_sent";
-}
 function drawKazeHud() {
   if (!panels.kazeButton) return;
-  const st = kaze.state?.state, on = kazeWatching(), canTap = st === "watching" || st === "checkin_due";
-  // Always visible in live mode: a check-in button you cannot find is worse than none. Without a watch a tap
-  // explains itself in the chat ("Pair this Quest with KAZE first"); alert states stay untappable (PIN only).
-  panels.kazeButton.enabled = on ? canTap : true; panels.kazeButton.mesh.visible = true;
+  const st = kaze.state?.state, due = st === "checkin_due";
+  // Take over the center of view only during the response window; hide it while waiting and during PIN-only alert states.
+  panels.kazeButton.enabled = due; panels.kazeButton.mesh.visible = due;
+  if (panels.card) panels.card.mesh.visible = !due;
+  const ordinary = ["cancel", "now", "yes", "no", "notsign", "safe", "confirm", "redo", "undo", "send", "clear", "status", "agent", "caption"];
+  if (due) {
+    for (const name of ordinary) if (panels[name]) panels[name].mesh.visible = false;
+  } else if (!CARD_UI) {
+    for (const name of ["status", "agent", "caption"]) if (panels[name]) panels[name].mesh.visible = true;
+    for (const name of ["confirm", "redo", "undo", "send", "clear", "yes", "no"])
+      if (panels[name]) panels[name].mesh.visible = panels[name].enabled;
+  }
   if (panels.safe) { panels.safe.set(false); panels.safe.mesh.visible = false; }
-  const remain = Math.max(0, Number(kaze.state?.respond_within ?? kaze.state?.alert_in ?? kaze.state?.next_checkin_in ?? 0));
+  const showCountdown = st === "checkin_due" || st === "alert_pending";
+  const remain = st === "checkin_due" ? Math.max(0, Number(kaze.state?.respond_within ?? 60))
+    : st === "alert_pending" ? Math.max(0, Number(kaze.state?.alert_in ?? 0)) : 0;
   if (st !== kazeRing.state || remain > kazeRing.total) kazeRing = { state: st, total: Math.max(remain, 1) };
   const progress = Math.min(1, remain / kazeRing.total), secs = Math.max(0, Math.ceil(remain));
-  const color = st === "alert_pending" || st === "alert_sent" ? C.bad : st === "checkin_due" ? C.warn : C.ok;
+  const color = st === "checkin_due" ? C.warn : C.ok;
   panels.kazeButton.color = color;
   panels.kazeButton.draw((ctx, W, H) => {
     const cx = W / 2, cy = H / 2, m = Math.min(W, H), TAU = Math.PI * 2;
@@ -134,9 +145,9 @@ function drawKazeHud() {
     ctx.lineWidth = m * 0.025; ctx.strokeStyle = "rgba(14,26,36,0.55)"; ctx.beginPath(); ctx.arc(cx, cy, fillR, 0, TAU); ctx.stroke();
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillStyle = C.ink; ctx.font = `800 ${m * 0.11}px system-ui`;
-    const label = st === "alert_sent" ? "HELP" : "I'M SAFE";
+    const label = st === "alert_sent" ? "HELP" : st === "checkin_due" ? "CHECK IN" : "I'M SAFE";
     label.split(/\s+/).forEach((line, i, a) => ctx.fillText(line, cx, cy + (i - (a.length - 1) / 2) * m * 0.12));
-    if (on && st !== "alert_sent") {                                               // countdown in the gap between button and ring
+    if (showCountdown) {                                                           // show time only after the interval has elapsed
       ctx.fillStyle = color; ctx.font = `800 ${m * 0.06}px system-ui`;
       ctx.fillText(String(secs), cx, cy - (fillR + ringR - ringW / 2) / 2);
     }
@@ -405,6 +416,7 @@ function onFrame(time, frame) {
   if ((MODE === "record" || CARD_UI) && S.hands !== lastHands) { lastHands = S.hands; draw(); }
   buttons.update(tips, time / 1000);
   if (CARD_UI && placed) updateCard(time, hp, hq, left, right, tips);
+  if (kaze.state?.state === "checkin_due") positionKazeCenter(hp, new THREE.Quaternion(hq.x, hq.y, hq.z, hq.w));
   const nowMs = performance.now(), until = S.speech ? S.speech.until : S.confirm && S.confirm.until ? S.confirm.until : 0;
   if (until) { const sec = Math.ceil((until - nowMs) / 1000); if (sec !== lastTick) { lastTick = sec; draw(); } }                       // countdowns tick
   if (S.confirm && S.confirm.until && nowMs > S.confirm.until + 2000) { S.confirm = null; draw(); }                                  // watchdogs: nothing can stay stuck

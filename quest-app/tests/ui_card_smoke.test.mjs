@@ -116,22 +116,23 @@ T.net.h.notice({ text: "Please sign again, a little slower." }); run(1, 0, FAR);
 for (let i = 0; i < 80; i++) T.net.h.caption({ text: "line " + i + " of a long conversation that wraps onto several lines of the card" });
 run(1, 0, FAR); assert.ok(texts.get(T.panels.card.canvas).every(t => t.y > -1 && t.y < 520), "all text inside the card");
 
-// 11. KAZE check-in: one circular I'M SAFE button, thick ring around it, beside the card — always findable in live mode
-assert.equal(T.panels.kazeButton.mesh.visible, true, "always available in live mode, even before a watch starts");
+// 11. KAZE check-in: hidden while waiting; centered and visible only during the response countdown
+assert.equal(T.panels.kazeButton.mesh.visible, false, "hidden before the check-in countdown starts");
 T.kaze.onState({ state: "watching", next_checkin_in: 42 }); run(1, 0, FAR);
-assert.equal(T.panels.kazeButton.mesh.visible, true);
+assert.equal(T.panels.kazeButton.mesh.visible, false);
 assert.equal(T.panels.card.mesh.visible, true, "conversation card stays up");
 assert.equal(T.panels.safe.mesh.visible, false, "the under-card duplicate stays off");
 assert.ok(Number.isFinite(T.panels.kazeButton.mesh.position.x) && Number.isFinite(T.panels.kazeButton.mesh.position.z), "button has a real world position");
-assert.ok(Math.abs(T.panels.kazeButton.mesh.position.x - card().position.x) > 0.15, "HUD sits beside the card, not on top of it");
 const kazeShown = () => texts.get(T.panels.kazeButton.canvas).map(t => t.t).join(" ");
-assert.ok(kazeShown().includes("I'M") && kazeShown().includes("SAFE") && kazeShown().includes("42"), kazeShown());
-T.kaze.onState({ state: "checkin_due", respond_within: 7 }); run(1, 0, FAR);
+assert.ok(kazeShown().includes("I'M") && kazeShown().includes("SAFE") && !/\d/.test(kazeShown()), kazeShown());
+T.kaze.onState({ state: "checkin_due", respond_within: 60 }); run(1, 0, FAR);
 assert.equal(T.panels.kazeButton.mesh.visible, true); assert.equal(T.panels.kazeButton.enabled, true);
-assert.ok(kazeShown().includes("SAFE") && kazeShown().includes("7"), kazeShown());
+assert.equal(T.panels.card.mesh.visible, false, "check-in prompt takes the center of view");
+assert.ok(near(T.panels.kazeButton.mesh.position.x, 0) && near(T.panels.kazeButton.mesh.position.y, 1.6) && near(T.panels.kazeButton.mesh.position.z, -0.55), "button is centered in front of the wearer");
+assert.ok(kazeShown().includes("CHECK IN") && kazeShown().includes("60"), kazeShown());
 T.kaze.onState({ state: "alert_pending", alert_in: 5 }); T.draw();
-assert.equal(T.panels.kazeButton.enabled, false, "alert states need the PIN, not a tap");
+assert.equal(T.panels.kazeButton.enabled, false, "alert states need the PIN, not a tap"); assert.equal(T.panels.kazeButton.mesh.visible, false);
 T.kaze.onState({ state: "idle" }); T.draw();
-assert.equal(T.panels.kazeButton.mesh.visible, true, "still there when the watch stops");
+assert.equal(T.panels.kazeButton.mesh.visible, false, "hidden when no countdown is active");
 assert.ok(kazeShown().includes("SAFE") && !/\d/.test(kazeShown()), "no countdown while not watching: " + kazeShown());
 console.log("PASS ui card smoke"); process.exit(0);

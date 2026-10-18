@@ -285,7 +285,7 @@ def setup_page(): return FileResponse(STATIC / "setup.html")
 
 
 @pages.get("/kaze/device")
-def device_page(): return FileResponse(STATIC / "device.html")
+def device_page(): return FileResponse(STATIC / "device.html", headers={"Cache-Control": "no-store"})
 
 
 @pages.get("/kaze/c/{token}")

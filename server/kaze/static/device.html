@@ -11,6 +11,9 @@ h1{font-size:1.1rem;margin:0;color:var(--paper)}.dim{color:var(--dim);font-size:
 .state{font-size:2rem;font-weight:800;text-align:center;padding:1.2rem 1rem;border:1px solid var(--line);border-radius:22px;background:rgba(21,38,52,.7)}
 .count{text-align:center;font-size:1.35rem;font-weight:700;min-height:1.6rem}
 button{font:inherit;font-weight:800;border:0;border-radius:18px;padding:1.05rem;cursor:pointer;color:var(--ink);background:var(--ok);width:100%}
+button#safe{min-height:4rem;font-size:1.2rem;box-shadow:0 0 0 2px rgba(53,194,176,.28)}
+body.due button#safe{background:var(--warn);color:var(--ink);box-shadow:0 0 0 3px rgba(242,180,65,.35);animation:pulse 1.4s ease-in-out infinite alternate}
+@keyframes pulse{to{filter:brightness(1.18);transform:scale(1.015)}}
 button.ghost{background:#25405a;color:var(--paper)}button.warn{background:var(--warn)}button.bad{background:var(--bad)}
 button:disabled{opacity:.45}button:focus-visible{outline:3px solid var(--paper);outline-offset:2px}
 .row{display:flex;gap:.7rem}.row>*{flex:1}
@@ -38,7 +41,7 @@ input{font:inherit;background:#0b1620;color:var(--paper);border:1px solid var(--
     </div>
     <div class="state" id="screen">—</div>
     <div class="count" id="count"></div>
-    <button id="safe">I'm safe ✓</button>
+    <button id="safe" type="button" aria-label="Check in: I'm safe">Check in · I'm safe ✓</button>
     <div class="card">
       <div class="dim" style="margin-bottom:.4rem">PIN (for cancel / stop)</div>
       <div class="pin" id="pinbox">····</div>
@@ -66,6 +69,7 @@ $("pairgo").onclick=()=>{ TOKEN=$("tok").value.trim(); $("pairerr").textContent=
 const LABEL={idle:"Not watching",watching:"Safe. Watching.",checkin_due:"Are you safe?",alert_pending:"Alert will be sent unless you enter your PIN",alert_sent:"Alert sent"};
 function setState(s){ const L=LABEL[s.state]||s.state; $("screen").textContent=L;
   document.body.className = s.state==="checkin_due"?"due":s.state==="alert_pending"?"alert":s.state==="alert_sent"?"help":"";
+  $("safe").textContent = s.state==="checkin_due" ? "CHECK IN NOW · I'M SAFE ✓" : "Check in · I'm safe ✓";
   $("count").textContent = s.next_checkin_in!=null?`Next check-in in ${s.next_checkin_in}s`: s.respond_within!=null?`Answer within ${s.respond_within}s`: s.alert_in!=null?`Alert in ${s.alert_in}s`: s.help_on_the_way?"Help is on the way":""; }
 function maybeSpeak(s){ if(s.state==="checkin_due"&&lastState!=="checkin_due"&&Date.now()-speakAt>5000){ speakAt=Date.now(); try{ const u=new SpeechSynthesisUtterance("Are you safe?"); speechSynthesis.speak(u);}catch(e){} } lastState=s.state; }
 async function poll(){ if(!TOKEN)return; const r=await D("/state");

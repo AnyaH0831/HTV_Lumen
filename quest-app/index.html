@@ -56,9 +56,9 @@
     <p>Pick the word group to record. A card shows its words, clips already recorded per word, and how many sessions are done — the first unfinished group is pre-selected.</p>
   </section>
   <section id="safety">
-    <label><input id="kazeEnable" type="checkbox"> Enable safety check-ins</label>
+    <label><input id="kazeEnable" type="checkbox"> Start safety check-ins with Lumen</label>
     <label>Check in every <input id="kazeMinutes" type="number" min="1" max="1440" value="15"> minutes</label>
-    <p id="safetyStatus">Check-ins use the default demo contact and pair automatically when you start.</p>
+    <p id="safetyStatus">Turn this on before starting live mode. The Quest check-in button then works in-headset; demo alerts use the configured notification mode.</p>
   </section>
   <button id="enter" disabled>Start in passthrough</button>
   <span id="log" role="status"></span>
@@ -112,5 +112,5 @@ if (q.get("mode") === "record") {
   }).catch(e => { $("cards").innerHTML = `<p>Could not load word groups: ${esc(e.message)}</p>`; });
 }
 </script>
-<script type="module" src="./src/main.js"></script>
+<script type="module" src="./src/main.js?v=quest-checkin-center-distance-20261018"></script>
 </body></html>

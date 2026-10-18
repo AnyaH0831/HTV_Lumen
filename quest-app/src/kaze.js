@@ -12,12 +12,12 @@ export class KazeClient {
   async pairDemo() {
     const r = await fetch("/api/kaze/demo/pair", { method: "POST" });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data.device_token) throw new Error(data.error || "Demo KAZE pairing is unavailable.");
+    if (!r.ok || !data.device_token) throw new Error(data.error || "Quest safety check-ins are unavailable on this server.");
     this.token = data.device_token;
     if (typeof localStorage?.setItem === "function") localStorage.setItem(TOKEN_KEY, this.token);
   }
   async call(path, method = "GET", body) {
-    if (!this.token) throw new Error("Pair this Quest with KAZE first at /kaze/device.");
+    if (!this.token) throw new Error("Enable “Start safety check-ins with Lumen” on the launch screen, then restart live mode.");
     const r = await fetch(`/api/kaze/device${path}`, { method, headers: this.headers(), ...(body ? { body: JSON.stringify(body) } : {}) });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || `KAZE request failed (${r.status})`);
@@ -35,7 +35,7 @@ export class KazeClient {
     if (!profile || !profile.name) throw new Error("KAZE device pairing was not accepted.");
     const existing = await this.call("/state");
     if (existing.state === "alert_sent") await this.call("/watch/stop", "POST", { pin: "1234" });
-    await this.call("/watch/start", "POST", { config: { checkin_interval_s: Math.round(minutes * 60) } });
+    await this.call("/watch/start", "POST", { config: { checkin_interval_s: Math.round(minutes * 60), response_window_s: 60 } });
     await this.refresh();
     this.timer = setInterval(() => this.refresh(), 1000);
   }
