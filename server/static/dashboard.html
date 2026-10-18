@@ -1,0 +1,134 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lumen dashboard</title>
+<style>
+:root{--ink:#0E1A24;--panel:#152634;--line:#22384A;--paper:#F3EFE6;--dim:#8FA3B0;--ok:#35C2B0;--warn:#F2B441;--bad:#F26B5B}
+*{box-sizing:border-box}
+body{margin:0;color:var(--paper);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh;
+     background:radial-gradient(1000px 640px at 78% -25%,#27506b 0%,rgba(14,26,36,0) 62%),
+                radial-gradient(820px 560px at -5% 108%,#123743 0%,rgba(14,26,36,0) 58%),var(--ink)}
+header{padding:.85rem 1.5rem;border-bottom:1px solid rgba(255,255,255,.09);display:flex;gap:1rem;align-items:baseline;
+       background:rgba(14,26,36,.55);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);position:sticky;top:0;z-index:5}
+h1{font-size:1.3rem;margin:0}#conn{color:var(--dim)}
+main{display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:1rem;padding:1.25rem 1.5rem 2rem}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+section{background:rgba(21,38,52,.55);border:1px solid rgba(255,255,255,.10);border-radius:16px;padding:1rem;min-height:14rem;
+        backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:0 12px 34px rgba(0,0,0,.28)}
+h2{font-size:.95rem;color:var(--dim);margin:0 0 .6rem;font-weight:600}
+.pill{display:inline-block;background:rgba(255,255,255,.10);border-radius:999px;padding:.25rem .8rem;margin:0 .35rem .35rem 0;font-weight:700}
+#trace div{padding:.25rem 0;border-bottom:1px solid rgba(255,255,255,.08);font:13px/1.4 ui-monospace,Menlo,monospace;word-break:break-word}
+input,button{font:inherit;border-radius:10px;border:1px solid rgba(255,255,255,.14);padding:.55rem .8rem}
+input{background:rgba(0,0,0,.35);color:var(--paper);width:100%;margin-bottom:.5rem}
+button{background:var(--ok);color:var(--ink);font-weight:700;border:0;cursor:pointer}
+button.no{background:var(--bad)}button.ghost{background:rgba(255,255,255,.14);color:var(--paper)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,input:focus-visible{outline:3px solid var(--paper);outline-offset:2px}
+/* --- middle column: the conversation, both directions, sitting LOW in the panel --- */
+section.talk{display:flex;flex-direction:column;padding-top:2.25rem}          /* content starts lower */
+#stage{color:var(--dim);font-size:.85rem;margin:0 0 .75rem;min-height:1.1em}
+#chat{flex:1;min-height:24rem;max-height:58vh;overflow-y:auto;display:flex;flex-direction:column;gap:.5rem;
+      padding:.5rem .25rem .75rem;border:1px solid rgba(255,255,255,.07);border-radius:12px;background:rgba(0,0,0,.14)}
+#chat::before{content:"";margin-top:auto}                                   /* pushes messages to the bottom */
+#empty{color:var(--dim);font-size:.9rem;text-align:center;margin:auto 0}     /* ... so nothing sits up top */
+.msg{max-width:84%;padding:.6rem .85rem;border-radius:14px;font-size:1rem;line-height:1.45;animation:pop .18s ease-out}
+.msg.me{align-self:flex-end;background:rgba(53,194,176,.17);border:1px solid rgba(53,194,176,.35);border-bottom-right-radius:4px}
+.msg.them{align-self:flex-start;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.13);border-bottom-left-radius:4px}
+.msg.flag{border-color:rgba(242,180,65,.55)}
+.who{display:block;font-size:.7rem;letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin-bottom:.15rem}
+.sys{align-self:center;font-size:.78rem;color:var(--dim);text-align:center;padding:.1rem .5rem}
+@keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+#sayrow{display:flex;gap:.5rem;margin-top:.7rem}
+#sayrow input{margin:0;flex:1}
+#confirm{display:none;margin-top:.75rem;padding:.75rem;border:1px solid var(--warn);border-radius:10px;background:rgba(242,180,65,.10)}
+#speech{display:none;margin-top:.75rem;padding:.75rem;border:1px solid var(--ok);border-radius:10px;background:rgba(53,194,176,.10)}
+#smeta{color:var(--dim);font-size:.85rem;margin:.25rem 0 .5rem}
+</style></head><body>
+<header><h1>Lumen</h1><span id="conn">connecting</span></header>
+<main>
+<section><h2>Confirmed signs</h2><div id="tokens"></div>
+ <h2 style="margin-top:1rem">Test without a headset</h2>
+ <input id="sim" value="PAIN HEAD ALLERGIC" aria-label="Sign glosses to simulate"><button id="go">Send to agent</button>
+ <p style="color:var(--dim);font-size:.85rem">Conversation: what the signer says sits on the right, what the clinician says sits on the left. Clinician speech is fed back to the interpreter as context.</p></section>
+
+<section class="talk"><h2>Conversation</h2>
+ <div id="stage">idle</div>
+ <div id="chat"><div id="empty">Nothing said yet.</div></div>
+ <div id="sayrow">
+   <input id="doc" placeholder="Clinician speaks — type it, or press the mic" aria-label="Clinician speech">
+   <button id="mic" class="ghost" title="Voice to text">● mic</button>
+   <button id="say">Say</button>
+ </div>
+ <div id="confirm"><strong>Waiting for the signer to approve:</strong><p id="csum"></p><button id="yes">Approve here</button> <button class="no" id="no">Reject</button></div>
+ <div id="speech"><strong id="stxt"></strong><div id="smeta"></div><button class="no" id="scancel">Cancel</button> <button id="snow">Speak now</button></div>
+</section>
+
+<section><h2>Agent trace</h2><div id="trace"></div></section>
+</main>
+<script>
+const $=i=>document.getElementById(i);let ws,cid=null,speechTimer=null,speechLeft=0;
+const chat=()=>$("chat");
+function empty(){const e=$("empty");if(e)e.remove()}
+function bubble(side,who,text,flag){empty();const d=document.createElement("div");
+ d.className="msg "+side+(flag?" flag":"");const w=document.createElement("span");w.className="who";w.textContent=who;
+ d.appendChild(w);d.appendChild(document.createTextNode(text));chat().appendChild(d);chat().scrollTop=chat().scrollHeight}
+const out=(who,text,flag)=>bubble("me",who,text,flag);      // right: what is being sent out
+const inc=(who,text)=>bubble("them",who,text);              // left: what is coming in
+function sys(text){empty();const d=document.createElement("div");d.className="sys";d.textContent=text;
+ chat().appendChild(d);chat().scrollTop=chat().scrollHeight}
+function doctor(t){ws.send(JSON.stringify({type:"doctor_says",text:t}))}   // single path: server echoes it back as a chat line
+function connect(){ws=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/ws?role=dashboard`);
+ws.onopen=()=>$("conn").textContent="connected";ws.onclose=()=>{$("conn").textContent="reconnecting";setTimeout(connect,1500)};
+ws.onmessage=e=>{const m=JSON.parse(e.data);
+ if(m.type==="tokens")$("tokens").innerHTML=m.tokens.map(t=>`<span class="pill">${t.gloss.replace("_"," ")}</span>`).join("")||"<span style='color:var(--dim)'>none</span>";
+ if(m.type==="agent_log"){const d=document.createElement("div");d.textContent=m.text;$("trace").appendChild(d);$("trace").scrollTop=$("trace").scrollHeight}
+ if(m.type==="agent_done"){cid=null;$("confirm").style.display="none";sys("✓ done")}
+ if(m.type==="confirm_request"){cid=m.id;$("csum").textContent=m.summary;$("confirm").style.display="block";sys("read-back spoken to the signer — waiting for approval")}
+ if(m.type==="normalized")out("Signer → understood",m.sentence,m.uncertain);
+ if(m.type==="stage")$("stage").textContent="stage: "+m.stage+(m.stage==="normalize"?" (reading the signs)":"")+(m.stage==="plan"?" (deciding what to do)":"")+(m.stage==="waiting"?" (waiting for the signer to finish)":"");
+ if(m.type==="caption_out")out("To the clinician",m.text);
+ if(m.type==="caption")inc("Clinician",m.text);
+ if(m.type==="tts")new Audio(m.url).play().catch(()=>{});
+ if(m.type==="agent_start")$("trace").innerHTML="";
+ if(m.type==="confirm_closed"){cid=null;$("confirm").style.display="none"}
+ if(m.type==="policy"&&m.action==="ask")sys("checking with the signer first: "+m.reasons.join("; "));
+ if(m.type==="notice")sys(m.text);
+ if(m.type==="speech_pending"){speechLeft=Math.ceil(m.seconds);$("stxt").textContent=m.text;$("speech").style.display="block";clearInterval(speechTimer);
+   const tick=()=>{$("smeta").textContent="Speaking in "+speechLeft+" s unless the signer cancels"+(m.notes&&m.notes.length?" - fixed: "+m.notes.join("; "):"");speechLeft=Math.max(0,speechLeft-1)};
+   tick();speechTimer=setInterval(tick,1000)}
+ if(m.type==="speech_done"||m.type==="speech_cancelled"){clearInterval(speechTimer);$("speech").style.display="none";if(m.type==="speech_cancelled")sys("cancelled by the signer - nothing was said")}
+ if(m.type==="say")try{speechSynthesis.speak(new SpeechSynthesisUtterance(m.text))}catch(e){};};}
+connect();
+$("go").onclick=()=>{$("trace").innerHTML="";ws.send(JSON.stringify({type:"send",tokens:$("sim").value.trim().split(/\s+/).filter(Boolean).map(g=>({gloss:g.toUpperCase(),conf:0.95}))}))};
+$("yes").onclick=()=>{ws.send(JSON.stringify({type:"confirm",id:cid,ok:true}));$("confirm").style.display="none"};
+$("no").onclick=()=>{ws.send(JSON.stringify({type:"confirm",id:cid,ok:false}));$("confirm").style.display="none"};
+$("scancel").onclick=()=>ws.send(JSON.stringify({type:"cancel_speech"}));
+$("snow").onclick=()=>ws.send(JSON.stringify({type:"speak_now"}));
+$("say").onclick=()=>{const t=$("doc").value.trim();if(t){doctor(t);$("doc").value=""}};
+$("doc").addEventListener("keydown",e=>{if(e.key==="Enter")$("say").click()});
+/* Voice-to-text from the doctor. Browser STT where it exists (Chrome/Edge, instant); otherwise stream
+   the mic to the server's Whisper, so it also works on the headset, Firefox and Safari. */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let mic={node:null,src:null,ctx:null,stream:null};
+async function micStart(){
+  mic.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+  mic.ctx=new (window.AudioContext||window.webkitAudioContext)();
+  mic.src=mic.ctx.createMediaStreamSource(mic.stream);
+  mic.node=mic.ctx.createScriptProcessor(4096,1,1);
+  const ratio=mic.ctx.sampleRate/16000;                         // server wants 16 kHz mono
+  mic.node.onaudioprocess=e=>{if(ws.readyState!==1)return;
+    const f=e.inputBuffer.getChannelData(0),n=Math.floor(f.length/ratio),out=new Int16Array(n);
+    for(let i=0;i<n;i++){const x=Math.max(-1,Math.min(1,f[Math.floor(i*ratio)]));out[i]=x<0?x*32768:x*32767}
+    const u=new Uint8Array(out.buffer);let s="";for(let i=0;i<u.length;i++)s+=String.fromCharCode(u[i]);
+    ws.send(JSON.stringify({type:"doctor_audio",pcm:btoa(s)}))};
+  mic.src.connect(mic.node);mic.node.connect(mic.ctx.destination);
+}
+function micStop(){try{mic.node&&mic.node.disconnect()}catch(e){}try{mic.src&&mic.src.disconnect()}catch(e){}try{mic.ctx&&mic.ctx.close()}catch(e){}try{mic.stream&&mic.stream.getTracks().forEach(t=>t.stop())}catch(e){}mic={node:null,src:null,ctx:null,stream:null}}
+if(SR){$("mic").onclick=()=>{const r=new SR();r.lang="en-US";r.interimResults=false;
+ r.onresult=e=>{const t=e.results[0][0].transcript;if(t)doctor(t)};
+ r.onerror=()=>$("mic").disabled=false;r.onend=()=>$("mic").disabled=false;
+ $("mic").disabled=true;try{r.start()}catch(e){$("mic").disabled=false}};}
+else if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia){
+ $("mic").onclick=async()=>{
+  if(mic.node){micStop();$("mic").textContent="● mic";$("mic").title="Voice to text";return}
+  try{await micStart();$("mic").textContent="■ listening";$("mic").title="Streaming to the server — click to stop"}
+  catch(e){$("mic").textContent="● mic";$("mic").title="Microphone blocked — type instead"}};}
+else{$("mic").disabled=true;$("mic").textContent="⌨ mic n/a";$("mic").title="Voice-to-text needs Chrome/Edge — type instead"}
+</script></body></html>

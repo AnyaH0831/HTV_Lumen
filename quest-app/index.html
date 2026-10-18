@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lumen</title>
+<style>
+  :root { --ink:#0E1A24; --paper:#F3EFE6; --dim:#8FA3B0; --ok:#35C2B0; --warn:#F2B441; --line:#22384A; }
+  body { margin:0; min-height:100vh; background:var(--ink); color:var(--paper); font:18px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; display:grid; place-items:center; }
+  main { max-width:34rem; padding:2rem; }
+  body.rec main { max-width:68rem; }
+  h1 { font-size:2.4rem; margin:0 0 .25rem; letter-spacing:-.02em; }
+  p { color:var(--dim); margin:.25rem 0 1.25rem; }
+  button { font:700 1.1rem system-ui; padding:.9rem 1.6rem; border:0; border-radius:999px; background:var(--ok); color:var(--ink); cursor:pointer; }
+  button:disabled { background:#22384A; color:var(--dim); cursor:wait; }
+  button:focus-visible { outline:3px solid var(--paper); outline-offset:3px; }
+  #log { display:block; margin-top:1.25rem; color:var(--paper); min-height:1.5em; }
+  /* --- recording word-group picker (?mode=record) --- */
+  #rec { margin:1.5rem 0; }
+  #fields { display:flex; gap:.8rem; flex-wrap:wrap; align-items:end; margin-bottom:1.25rem; }
+  #fields label { display:flex; flex-direction:column; gap:.3rem; font-size:.85rem; color:var(--dim); font-weight:700; }
+  #fields input { font:inherit; color:var(--paper); background:#13263A; border:1px solid var(--line); border-radius:10px; padding:.55rem .7rem; width:11rem; }
+  #fields input:focus-visible { outline:3px solid var(--paper); outline-offset:2px; }
+  #negative { display:flex; gap:.5rem; align-items:center; margin:.75rem 0; color:var(--paper); font-weight:700; }
+  #negative input { width:1.2rem; height:1.2rem; accent-color:var(--ok); }
+  #cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(19rem,1fr)); gap:1rem; }
+  #safety { margin:1.5rem 0; padding:1rem; background:#13263A; border:1px solid var(--line); border-radius:12px; }
+  #safety label { display:flex; gap:.6rem; align-items:center; font-weight:700; }
+  #safety input[type=number] { width:5rem; margin:0 .35rem; }
+  #safety input[type=checkbox] { width:1.2rem; height:1.2rem; accent-color:var(--ok); }
+  #safetyStatus { font-size:.85rem; margin:.5rem 0 0; }
+  .card { text-align:left; background:#13263A; border:2px solid var(--line); border-radius:16px; padding:1rem 1.1rem; color:var(--paper); cursor:pointer; display:flex; flex-direction:column; gap:.45rem; font:inherit; }
+  .card:hover { border-color:var(--dim); }
+  .card.sel { border-color:var(--ok); }
+  .card.done { border-color:rgba(53,194,176,.5); }
+  .card h2 { margin:0; font-size:1.3rem; }
+  .card .words { color:var(--paper); font-size:.95rem; }
+  .card .clips { color:var(--dim); font-size:.8rem; }
+  .card .meta { display:flex; gap:.5rem; align-items:center; font-size:.85rem; font-weight:700; }
+  .tag { display:inline-block; border-radius:999px; padding:.15rem .6rem; }
+  .tag.open { background:var(--warn); color:var(--ink); }
+  .tag.done { background:var(--ok); color:var(--ink); }
+</style>
+<script src="./vendor/ort.min.js"></script>
+<script type="importmap">{ "imports": { "three": "./vendor/three.module.js" } }</script>
+</head><body>
+<main>
+  <h1>Lumen</h1>
+  <p id="mode">Loading</p>
+  <p>Put the controllers down so the headset tracks your hands, then start. Signs are recognised on the headset; nothing but the confirmed words leaves it.</p>
+  <section id="rec" hidden>
+    <div id="fields">
+      <label>Signer<input id="signer" value="anon" maxlength="32" autocomplete="off" spellcheck="false"></label>
+      <label>Session<input id="session" value="s1" maxlength="32" autocomplete="off" spellcheck="false"></label>
+      <label>Reps per word<input id="reps" type="number" min="1" max="99" value="5"></label>
+    </div>
+    <label id="negative"><input id="background" type="checkbox"> Background-only session (do not sign)</label>
+    <div id="cards" role="listbox" aria-label="Word groups"></div>
+    <p>Pick the word group to record. A card shows its words, clips already recorded per word, and how many sessions are done — the first unfinished group is pre-selected.</p>
+  </section>
+  <section id="safety">
+    <label><input id="kazeEnable" type="checkbox"> Enable safety check-ins</label>
+    <label>Check in every <input id="kazeMinutes" type="number" min="1" max="1440" value="15"> minutes</label>
+    <p id="safetyStatus">Check-ins use the default demo contact and pair automatically when you start.</p>
+  </section>
+  <button id="enter" disabled>Start in passthrough</button>
+  <span id="log" role="status"></span>
+</main>
+<script type="module">
+// Recording page: signer/session/reps + one selectable card per word group (?mode=record).
+const q = new URLSearchParams(location.search);
+if (q.get("mode") === "record") document.getElementById("safety").hidden = true;
+else {
+  const enabled = localStorage.getItem("lumen_kaze_enabled") === "1", minutes = localStorage.getItem("lumen_kaze_minutes") || "15";
+  document.getElementById("kazeEnable").checked = enabled; document.getElementById("kazeMinutes").value = minutes;
+  document.getElementById("kazeEnable").onchange = e => localStorage.setItem("lumen_kaze_enabled", e.target.checked ? "1" : "0");
+  document.getElementById("kazeMinutes").onchange = e => localStorage.setItem("lumen_kaze_minutes", String(Math.max(1, Math.min(1440, +e.target.value || 15))));
+}
+if (q.get("mode") === "record") {
+  document.body.classList.add("rec");
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const signer = q.get("signer") || "anon";
+  $("rec").hidden = false;
+  $("signer").value = signer;
+  $("session").value = q.get("session") || "s1";
+  $("reps").value = q.get("reps") || "5";
+  $("background").checked = q.get("background") === "1";
+  $("cards").hidden = $("background").checked;
+  const go = extra => {                                   // picking a card reloads so the app builds that group's prompts
+    const p = new URLSearchParams({ mode: "record", signer: $("signer").value.trim() || "anon",
+      session: $("session").value.trim() || "s1", reps: $("reps").value || "5", background: $("background").checked ? "1" : "0", ...extra });
+    location.search = p;
+  };
+  for (const id of ["signer", "session", "reps", "background"]) $(id).addEventListener("change", () => go({ group: q.get("group") }));
+  fetch(`/api/groups?signer=${encodeURIComponent(signer)}`).then(r => r.json()).then(d => {
+    if (d.nextSession && !q.get("session")) $("session").value = d.nextSession;
+    const sel = q.get("group");
+    for (const g of d.groups || []) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "card" + (g.id === sel ? " sel" : "") + (g.done ? " done" : "");
+      b.setAttribute("role", "option");
+      b.setAttribute("aria-selected", g.id === sel ? "true" : "false");
+      const words = g.glosses.map(w => w.replace(/_/g, " ").toLowerCase());
+      const clips = g.glosses.map(w => `${w.replace(/_/g, " ")} ${g.clips[w] ?? 0}`).join(" · ");
+      b.innerHTML = `<h2>${esc(g.name)}</h2>
+        <span class="words">${esc(words.join(" · "))}</span>
+        <span class="meta"><span class="tag ${g.done ? "done" : "open"}">${g.done ? "done" : "not started"}</span>
+          <span>${g.sessions} session${g.sessions === 1 ? "" : "s"}</span></span>
+        <span class="clips">${esc(clips)}</span>`;
+      b.onclick = () => go({ group: g.id });
+      $("cards").appendChild(b);
+    }
+  }).catch(e => { $("cards").innerHTML = `<p>Could not load word groups: ${esc(e.message)}</p>`; });
+}
+</script>
+<script type="module" src="./src/main.js"></script>
+</body></html>

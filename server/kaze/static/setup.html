@@ -1,0 +1,218 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>KAZE setup · laptop console</title>
+<style>
+:root{--ink:#0E1A24;--panel:#152634;--line:#22384A;--paper:#F3EFE6;--dim:#8FA3B0;--ok:#35C2B0;--warn:#F2B441;--bad:#F26B5B}
+*{box-sizing:border-box}body{margin:0;background:var(--ink);color:var(--paper);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;gap:.7rem;align-items:center;flex-wrap:wrap;padding:.8rem 1.2rem;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(14,26,36,.96);z-index:5}
+h1{font-size:1.2rem;margin:0}h2{font-size:.95rem;color:var(--dim);margin:0 0 .7rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+main{display:grid;grid-template-columns:1fr 1.35fr;gap:1rem;padding:1rem 1.2rem 3rem;align-items:start}@media(max-width:1050px){main{grid-template-columns:1fr}}
+section{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:1rem}.span{grid-column:1/-1}
+label{display:block;font-size:.78rem;color:var(--dim);margin:.5rem 0 .15rem}
+input,select{font:inherit;width:100%;background:#0b1620;color:var(--paper);border:1px solid var(--line);border-radius:10px;padding:.5rem .6rem}
+.grid{display:grid;gap:.55rem}.two{grid-template-columns:1fr 1fr}.three{grid-template-columns:1.3fr 1fr auto}
+button{font:inherit;font-weight:800;border:0;border-radius:12px;padding:.5rem .8rem;cursor:pointer;color:var(--ink);background:var(--ok);margin:.15rem .15rem .15rem 0}
+button.ghost{background:#25405a;color:var(--paper)}button.warn{background:var(--warn)}button.bad{background:var(--bad)}button:disabled{opacity:.45}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--paper);outline-offset:2px}
+table{border-collapse:collapse;width:100%;font-size:.85rem}td,th{border-bottom:1px solid var(--line);padding:.25rem .4rem;text-align:left;vertical-align:top}th{color:var(--dim);font-weight:600}
+.dim{color:var(--dim);font-size:.85rem}.state{font-size:1.35rem;font-weight:800}
+.pill{display:inline-block;border-radius:999px;padding:.1rem .55rem;font-size:.78rem;font-weight:800;background:#25405a}.pill.ok{background:var(--ok);color:var(--ink)}.pill.bad{background:var(--bad);color:var(--ink)}
+.row{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;justify-content:space-between;border-bottom:1px solid var(--line);padding:.3rem 0}
+.tl{max-height:20rem;overflow:auto}.hidden td{background:rgba(242,107,91,.10)}
+</style></head><body>
+<header>
+ <h1>KAZE · laptop console</h1>
+ <input id="tok" type="password" placeholder="admin token" size="20" aria-label="Admin token" style="width:auto"><button id="use">Use token</button>
+ <span id="health" class="pill">health: ?</span><span id="live" class="pill">live: off</span>
+ <a id="scn" href="/kaze" style="color:var(--dim)">scenarios console →</a>
+ <span class="dim">The headset is the device; this laptop configures and watches it. Messages are simulated unless a notification backend is configured.</span>
+</header>
+<main>
+<section>
+ <h2>People</h2>
+ <div id="people" class="dim">Enter the admin token.</div>
+ <div style="margin-top:.6rem"><button id="newperson" class="ghost">+ New person</button></div>
+</section>
+
+<section>
+ <h2>Setup <span id="editing" class="dim"></span></h2>
+ <label>Name</label><input id="f_name" placeholder="e.g. Sam">
+ <div class="grid two">
+  <div><label>Safe PIN (the normal “I'm safe” PIN)</label><input id="f_safe" placeholder="4821"></div>
+  <div><label>Duress PIN (looks normal, silently alerts)</label><input id="f_duress" placeholder="9137"></div>
+ </div>
+ <div class="grid two">
+  <div><label>Check-in every (s)</label><input id="f_checkin" type="number" min="1" value="900"></div>
+  <div><label>Time to answer (s)</label><input id="f_resp" type="number" min="1" value="60"></div>
+  <div><label>Alert grace after a miss (s)</label><input id="f_grace" type="number" min="1" value="30"></div>
+  <div><label>Each contact has (s) to acknowledge</label><input id="f_ack" type="number" min="1" value="120"></div>
+  <div><label>Max rounds through the contacts</label><input id="f_rounds" type="number" min="1" max="5" value="1"></div>
+  <div><label>Location policy</label><select id="f_locpolicy"><option value="on_alert">on alert (per contact)</option><option value="never">never</option></select></div>
+ </div>
+ <label>Contacts (1–5). Location is only shared while an alert is active.</label>
+ <div id="contacts" class="grid"></div>
+ <div style="margin-top:.5rem"><button id="addcontact" class="ghost">+ contact</button><button id="save">Save person</button></div>
+ <div class="dim" id="savehint"></div>
+</section>
+
+<section class="span">
+ <h2>Headset device link</h2>
+ <div class="grid" style="grid-template-columns:1fr auto">
+  <input id="devlink" readonly placeholder="shown once when the person is created — use “New link” to re-pair">
+  <div><button id="open">Open</button><button id="copy" class="ghost">Copy</button><button id="rotate" class="warn">New link</button></div>
+ </div>
+ <p class="dim" id="devhint">Open the link in the headset browser once. It is the device key — keep it private.</p>
+</section>
+
+<section class="span">
+ <h2>Live monitor <span id="livewho" class="dim"></span></h2>
+ <div id="livebox" class="dim">Select a person.</div>
+ <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin:.5rem 0">
+  <button id="startwatch">Start watch with the timings above</button>
+  <button id="simoff" class="ghost">Simulate no connection: off</button>
+ </div>
+ <div class="grid two" style="align-items:start">
+  <div><h2 style="margin:.8rem 0 .4rem">Sessions</h2><div id="sessions" class="dim">—</div>
+       <h2 style="margin:.8rem 0 .4rem">Timeline (latest session)</h2><div id="timeline" class="dim">—</div></div>
+  <div><h2 style="margin:.8rem 0 .4rem">Contacts for the current alert</h2><div id="clive" class="dim">—</div>
+       <h2 style="margin:.8rem 0 .4rem">Simulated messages (outbox)</h2><div id="outbox" class="dim">—</div></div>
+ </div>
+</section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+let ADMIN = sessionStorage.getItem("kaze_admin") || "", USERS = [], SEL = null, TOKEN = null, offline = false, ws = null, unreach = {};
+$("tok").value = ADMIN;
+const A = (p, o = {}) => fetch("/api/kaze" + p, { ...o, headers: { "Content-Type": "application/json", "X-Admin-Token": ADMIN, ...(o.headers || {}) } })
+  .then(async r => ({ ok: r.ok, status: r.status, j: await r.json().catch(() => ({})) }));
+$("use").onclick = () => { ADMIN = $("tok").value.trim(); sessionStorage.setItem("kaze_admin", ADMIN); boot(); };
+
+async function health() { try { const j = await (await fetch("/api/kaze/health")).json();
+  $("health").textContent = "health: " + (j.ok ? "ok" : "DEGRADED"); $("health").className = "pill " + (j.ok ? "ok" : "bad"); }
+  catch (e) { $("health").textContent = "health: down"; $("health").className = "pill bad"; } }
+function openWS() { if (ws) ws.close();
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/kaze/ws/admin?token=${encodeURIComponent(ADMIN)}`);
+  ws.onopen = () => { $("live").textContent = "live: on"; $("live").className = "pill ok"; };
+  ws.onclose = () => { $("live").textContent = "live: off"; $("live").className = "pill"; };
+  ws.onmessage = e => { let m = {}; try { m = JSON.parse(e.data); } catch (_) { return; } if (SEL && (!m.user_id || m.user_id === SEL)) refreshAll(); }; }
+
+async function loadUsers() { USERS = (await A("/admin/users")).j || []; renderPeople(); }
+function renderPeople() {
+  if (!USERS.length) { $("people").textContent = "No people yet — create one."; return; }
+  $("people").innerHTML = USERS.map(u => `<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:.35rem 0">
+    <div><b>${esc(u.name)}</b> <span class="dim">${esc(u.id)}</span> ${u.active ? '<span class="pill ok">active</span>' : ""}${u.sim_offline ? '<span class="pill bad">offline</span>' : ""}</div>
+    <div><button class="ghost" data-s="${u.id}">Open</button><button class="bad" data-d="${u.id}">Erase</button></div></div>`).join("");
+  document.querySelectorAll("#people [data-s]").forEach(b => b.onclick = () => select(b.dataset.s));
+  document.querySelectorAll("#people [data-d]").forEach(b => b.onclick = async () => {
+    if (!confirm("Erase this person and all their data?")) return;
+    await A("/admin/users/" + b.dataset.d, { method: "DELETE" });
+    if (SEL === b.dataset.d) newPerson();
+    loadUsers(); });
+}
+
+function contactRow(name = "", loc = "none", can = false) {
+  const d = document.createElement("div"); d.className = "grid three";
+  d.innerHTML = `<input placeholder="contact name" value="${esc(name)}">
+    <select><option value="none">no location</option><option value="coarse">coarse (~1 km)</option><option value="precise">precise</option></select>
+    <span><button class="ghost" title="remove">✕</button></span>`;
+  d.querySelector("select").value = loc;
+  const box = document.createElement("label"); box.style.margin = "0"; box.style.display = "flex"; box.style.gap = ".3rem"; box.style.alignItems = "center";
+  box.style.color = "var(--paper)"; box.style.fontSize = ".85rem"; box.innerHTML = `<input type="checkbox" style="width:auto"${can ? " checked" : ""}> can resolve`;
+  d.querySelector("span").prepend(box);
+  d.querySelector("button").onclick = () => d.remove();
+  return d;
+}
+function collectContacts() {
+  return [...$("contacts").children].map(r => ({ name: r.querySelector("input[placeholder]").value.trim(),
+    permissions: { location: r.querySelector("select").value, can_resolve: r.querySelector("input[type=checkbox]").checked } })).filter(c => c.name);
+}
+function timingConfig() { return { checkin_interval_s: +$("f_checkin").value, response_window_s: +$("f_resp").value, alert_grace_s: +$("f_grace").value,
+  ack_timeout_s: +$("f_ack").value, max_rounds: +$("f_rounds").value }; }
+function drawDev() { $("devlink").value = TOKEN ? location.origin + "/kaze/device?t=" + encodeURIComponent(TOKEN) : ""; }
+$("addcontact").onclick = () => { if ($("contacts").children.length < 5) $("contacts").appendChild(contactRow()); };
+$("open").onclick = () => { if (TOKEN) window.open("/kaze/device?t=" + encodeURIComponent(TOKEN), "_blank"); };
+$("copy").onclick = () => { if ($("devlink").value) { navigator.clipboard.writeText($("devlink").value); $("copy").textContent = "Copied"; setTimeout(() => $("copy").textContent = "Copy", 1200); } };
+$("rotate").onclick = async () => { if (!SEL) return alert("Select a person first");
+  const r = await A("/admin/users/" + SEL + "/token", { method: "POST" }); if (r.ok) { TOKEN = r.j.device_token; drawDev(); } };
+
+function newPerson() {
+  SEL = null; TOKEN = null; $("editing").textContent = "(new)";
+  ["f_name", "f_safe", "f_duress"].forEach(i => $(i).value = "");
+  $("f_checkin").value = 900; $("f_resp").value = 60; $("f_grace").value = 30; $("f_ack").value = 120; $("f_rounds").value = 1; $("f_locpolicy").value = "on_alert";
+  $("f_safe").placeholder = "4821"; $("f_duress").placeholder = "9137";
+  $("contacts").innerHTML = ""; ["Alex", "Bo", "Cy"].forEach((n, i) => $("contacts").appendChild(contactRow(n, i === 0 ? "precise" : "none", i === 0)));
+  drawDev(); $("livewho").textContent = ""; $("livebox").textContent = "Select a person."; $("sessions").textContent = "—"; $("timeline").textContent = "—"; $("clive").textContent = "—";
+}
+$("newperson").onclick = newPerson;
+
+async function select(uid) {
+  SEL = uid; TOKEN = null; const p = (await A("/admin/users/" + uid)).j; if (!p.id) return alert("Could not load person");
+  $("editing").textContent = "(" + p.name + ")";
+  $("f_name").value = p.name; $("f_checkin").value = p.config.checkin_interval_s; $("f_resp").value = p.config.response_window_s;
+  $("f_grace").value = p.config.alert_grace_s; $("f_ack").value = p.config.ack_timeout_s; $("f_rounds").value = p.config.max_rounds; $("f_locpolicy").value = p.location_policy;
+  $("f_safe").value = ""; $("f_duress").value = ""; $("f_safe").placeholder = "unchanged"; $("f_duress").placeholder = "unchanged";
+  $("contacts").innerHTML = ""; p.contacts.forEach(c => $("contacts").appendChild(contactRow(c.name, c.permissions.location, c.permissions.can_resolve)));
+  offline = !!p.sim_offline; $("simoff").textContent = "Simulate no connection: " + (offline ? "ON" : "off");
+  drawDev(); await refreshAll();
+}
+
+$("save").onclick = async () => {
+  const contacts = collectContacts(); if (!contacts.length) return alert("Add at least one contact with a name");
+  const body = { name: $("f_name").value.trim(), contacts, location_policy: $("f_locpolicy").value, config: timingConfig() };
+  if ($("f_safe").value) body.safe_pin = $("f_safe").value;
+  if ($("f_duress").value) body.duress_pin = $("f_duress").value;
+  if (SEL) { const r = await A("/admin/users/" + SEL, { method: "PATCH", body: JSON.stringify(body) });
+    if (!r.ok) return alert("Error: " + (r.j.error || r.status)); $("savehint").textContent = "Saved " + new Date().toLocaleTimeString(); loadUsers(); select(SEL); }
+  else { if (!body.safe_pin || !body.duress_pin) return alert("Set both PINs for a new person");
+    const r = await A("/admin/users", { method: "POST", body: JSON.stringify(body) });
+    if (!r.ok) return alert("Error: " + (r.j.error || r.status)); TOKEN = r.j.device_token; SEL = r.j.user_id; drawDev();
+    $("savehint").textContent = "Created — copy the device link above onto the headset."; loadUsers(); select(SEL); }
+};
+
+$("startwatch").onclick = async () => { if (!SEL) return alert("Select a person first");
+  const r = await A("/admin/users/" + SEL + "/watch", { method: "POST", body: JSON.stringify({ config: timingConfig() }) });
+  if (!r.ok) alert("Error: " + (r.j.error || r.status)); refreshAll(); loadUsers(); };
+$("simoff").onclick = async () => { if (!SEL) return; offline = !offline;
+  await A("/admin/sim/offline", { method: "POST", body: JSON.stringify({ user_id: SEL, offline }) });
+  $("simoff").textContent = "Simulate no connection: " + (offline ? "ON" : "off"); loadUsers(); refreshAll(); };
+
+const LBL = { idle: "Not watching", watching: "Safe. Watching.", checkin_due: "Check-in due", alert_pending: "Alert pending", alert_sent: "Alert sent" };
+async function refreshState() { if (!SEL) return; const st = (await A("/admin/state/" + SEL)).j;
+  $("livewho").textContent = (USERS.find(u => u.id === SEL) || {}).name || SEL;
+  $("livebox").innerHTML = `<span class="state">${esc(LBL[st.state] || st.state)}</span>
+    ${st.duress ? '<span class="pill bad">DURESS — the person sees a normal screen</span>' : ""}
+    <div class="dim">session ${esc(st.session_id || "—")} · status ${esc(st.status || "—")} · round ${st.round ?? "—"} · contacts told ${st.contacts_notified ?? 0}</div>`;
+}
+async function refreshSessions() { if (!SEL) return; const ss = (await A("/admin/sessions/" + SEL)).j || [];
+  $("sessions").innerHTML = `<table><tr><th>id</th><th>status</th><th>duress</th><th>started</th></tr>` +
+    ss.slice(0, 8).map(s => `<tr class="${s.duress ? "hidden" : ""}"><td>${esc(s.id)}</td><td>${esc(s.status)}</td><td>${s.duress ? "yes" : "—"}</td><td>${new Date(s.started_at * 1000).toLocaleTimeString()}</td></tr>`).join("") + `</table>`; }
+const evDetail = p => p.text || p.note || p.reason || (p.contact ? p.contact + (p.precision ? " (" + p.precision + ")" : "") : "") || "";
+async function refreshTimeline(sid) { if (!sid) { $("timeline").textContent = "—"; return; }
+  const t = (await A("/admin/timeline/" + sid)).j;
+  if (!Array.isArray(t) || !t.length) { $("timeline").textContent = "No events yet."; return; }
+  const rows = t.slice().sort((a, b) => a.ts - b.ts).slice(-40).map(x =>
+    `<tr class="${(x.vis || "").includes("u") ? "" : "hidden"}"><td>${new Date(x.ts * 1000).toLocaleTimeString()}</td><td>${esc(x.kind)}</td><td>${esc(evDetail(x.payload || {})).slice(0, 160)}</td></tr>`);
+  $("timeline").innerHTML = `<table><tr><th>time</th><th>event</th><th>detail</th></tr>${rows.join("")}</table>`; }
+async function refreshContacts(sid) { if (!sid) { $("clive").textContent = "No active session."; return; }
+  const ls = (await A("/admin/links/" + sid)).j;
+  if (!Array.isArray(ls) || !ls.length) { $("clive").textContent = "No contacts."; return; }
+  $("clive").innerHTML = ls.map(l => `<div style="display:flex;justify-content:space-between;align-items:center;gap:.3rem;border-bottom:1px solid var(--line);padding:.25rem 0">
+    <span>${esc(l.contact)}${l.notified ? ' <span class="pill">notified</span>' : ' <span class="dim">not told yet</span>'}</span>
+    <span><button class="ghost" data-u="${l.contact_id}">Unreachable: ${unreach[l.contact_id] ? "ON" : "off"}</button>
+    <button class="ghost" data-o="${esc(l.url)}">Page</button><button class="warn" data-a="${esc(l.token)}">Ack</button><button class="bad" data-r="${esc(l.token)}">Resolve</button></span></div>`).join("");
+  document.querySelectorAll("#clive [data-o]").forEach(b => b.onclick = () => window.open(b.dataset.o, "_blank"));
+  document.querySelectorAll("#clive [data-u]").forEach(b => b.onclick = async () => { const cid = b.dataset.u; unreach[cid] = !unreach[cid];
+    await A("/admin/sim/unreachable", { method: "POST", body: JSON.stringify({ contact_id: cid, unreachable: unreach[cid] }) }); refreshContacts(sid); });
+  const hit = async (tok, action, body) => { const r = await fetch(`/api/kaze/contact/${tok}/${action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert("Refused: " + (j.error || r.status)); } refreshContacts(sid); };
+  document.querySelectorAll("#clive [data-a]").forEach(b => b.onclick = () => hit(b.dataset.a, "ack"));
+  document.querySelectorAll("#clive [data-r]").forEach(b => b.onclick = () => hit(b.dataset.r, "resolve", { reason: "false_alarm" })); }
+async function refreshOutbox() { const r = await A("/admin/outbox"); const rows = Array.isArray(r.j) ? r.j.slice(-20).reverse() : [];
+  $("outbox").innerHTML = rows.length ? `<table>` + rows.map(e => `<tr><td>${esc(e.payload.contact)}</td><td>${esc(e.payload.text)}</td><td>${e.payload.delivered ? "✓" : "✗"}</td></tr>`).join("") + `</table>` : "Nothing sent yet."; }
+async function refreshAll() { if (!SEL) return; await refreshState(); await refreshSessions();
+  const ss = (await A("/admin/sessions/" + SEL)).j || []; const s = ss.find(x => x.status !== "RESOLVED") || ss[0];
+  await refreshTimeline(s ? s.id : null); await refreshContacts(s ? s.id : null); }
+
+async function boot() { health(); if (!ADMIN) return; await loadUsers(); openWS(); newPerson(); refreshOutbox(); }
+setInterval(health, 5000); setInterval(refreshAll, 2000); setInterval(refreshOutbox, 5000);
+boot();
+</script></body></html>

@@ -1,0 +1,25 @@
+import { currentStep, cardFor, cue, STEPS, REST_MS, CUE_MS } from "../src/coach.js";
+import assert from "node:assert/strict";
+assert.equal(currentStep({ intro: true }, 0), -1, "no step highlighted during the intro");
+assert.equal(currentStep({ done: true }, 0), -1);
+assert.equal(currentStep({ pendingRec: {} }, 0), 2, "after a capture: wait for Saved");
+assert.equal(currentStep({ restUntil: 1000 }, 500), 0, "just saved: rest");
+assert.equal(currentStep({ restUntil: 1000 }, 1000 + 1), 1, "ready: sign");
+assert.equal(STEPS.length, 3); assert.ok(REST_MS > 0);
+// get-ready cue: counts down, then "go" (the beep moment)
+assert.ok(CUE_MS > 0);
+assert.deepEqual(cue(1000, 1000), { counting: true, seconds: Math.ceil(CUE_MS / 1000), go: false });
+assert.equal(cue(1000, 1000).seconds, 3, "3-2-1 for a 2400 ms cue");
+assert.deepEqual(cue(1000, 2000, 1000), { counting: false, seconds: 0, go: true }, "go exactly at the end");
+assert.equal(cue(1000, 2400).seconds, 1, "one second left");
+assert.equal(cue(1000, 1001).counting, true); assert.equal(cue(1000, 999999).go, true);
+const guide = { PAIN: { how: "do x", verified: false, image: "/signs/PAIN.jpg" }, HELLO: { how: "do y", verified: true } };
+const ph = { PAIN: "pain", HELLO: "hello", WATER: "water" };
+let c = cardFor({ label: "PAIN" }, guide, ph);
+assert.deepEqual([c.kind, c.title, c.meaning, c.verified, c.image], ["sign", "PAIN", "pain", false, "/signs/PAIN.jpg"]);
+assert.equal(cardFor({ label: "HELLO" }, guide, ph).verified, true);
+c = cardFor({ label: "WATER" }, guide, ph);
+assert.equal(c.how, "", "no invented instructions for a sign with no guide entry"); assert.equal(c.verified, false);
+c = cardFor({ label: "__background__", rep: 2 }, guide, ph);
+assert.equal(c.kind, "none"); assert.ok(c.tip.length > 5); assert.equal(cardFor(null, guide, ph), null);
+console.log("PASS coach");

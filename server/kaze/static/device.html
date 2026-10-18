@@ -1,0 +1,93 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>KAZE device</title>
+<style>
+:root{--ink:#0E1A24;--panel:#152634;--line:#22384A;--paper:#F3EFE6;--dim:#8FA3B0;--ok:#35C2B0;--warn:#F2B441;--bad:#F26B5B}
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:var(--ink);color:var(--paper);
+ font:18px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;
+ padding:env(safe-area-inset-top) 1rem calc(1rem + env(safe-area-inset-bottom));transition:background .25s}
+body.due{background:#3a2a12}body.alert{background:#3a1414}body.help{background:#0f3a33}
+main{width:min(34rem,100%);display:flex;flex-direction:column;gap:.9rem;padding-top:1rem}
+h1{font-size:1.1rem;margin:0;color:var(--paper)}.dim{color:var(--dim);font-size:.85rem}
+.state{font-size:2rem;font-weight:800;text-align:center;padding:1.2rem 1rem;border:1px solid var(--line);border-radius:22px;background:rgba(21,38,52,.7)}
+.count{text-align:center;font-size:1.35rem;font-weight:700;min-height:1.6rem}
+button{font:inherit;font-weight:800;border:0;border-radius:18px;padding:1.05rem;cursor:pointer;color:var(--ink);background:var(--ok);width:100%}
+button.ghost{background:#25405a;color:var(--paper)}button.warn{background:var(--warn)}button.bad{background:var(--bad)}
+button:disabled{opacity:.45}button:focus-visible{outline:3px solid var(--paper);outline-offset:2px}
+.row{display:flex;gap:.7rem}.row>*{flex:1}
+.pin{display:flex;align-items:center;justify-content:center;letter-spacing:.4rem;font-size:1.6rem;font-weight:800;height:3rem;
+ border:1px solid var(--line);border-radius:16px;background:#0b1620}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:.55rem}.pad button{padding:.9rem 0;font-size:1.4rem}
+.card{border:1px solid var(--line);border-radius:18px;padding:.9rem;background:rgba(21,38,52,.55)}
+.pill{display:inline-block;border-radius:999px;padding:.1rem .6rem;font-size:.8rem;font-weight:800;background:#25405a}
+.pill.ok{background:var(--ok);color:var(--ink)}.pill.bad{background:var(--bad);color:var(--ink)}
+input{font:inherit;background:#0b1620;color:var(--paper);border:1px solid var(--line);border-radius:12px;padding:.7rem;width:100%}
+.hide{display:none}.err{color:var(--bad);text-align:center;min-height:1.3rem}
+</style></head><body>
+<main>
+  <div class="card" id="pair">
+    <h1>KAZE device</h1>
+    <p class="dim">Paste the device link token your operator gave you (it looks like <code>ab12cd.yyy</code>).</p>
+    <input id="tok" placeholder="device token" aria-label="Device token">
+    <div style="height:.6rem"></div><button id="pairgo">Pair this device</button>
+    <p class="dim" id="pairerr"></p>
+  </div>
+
+  <div id="app" class="hide">
+    <div class="row" style="align-items:center;justify-content:space-between">
+      <h1 id="who">KAZE</h1><span id="conn" class="pill">…</span>
+    </div>
+    <div class="state" id="screen">—</div>
+    <div class="count" id="count"></div>
+    <button id="safe">I'm safe ✓</button>
+    <div class="card">
+      <div class="dim" style="margin-bottom:.4rem">PIN (for cancel / stop)</div>
+      <div class="pin" id="pinbox">····</div>
+      <div style="height:.5rem"></div>
+      <div class="pad" id="pad"></div>
+      <div class="row" style="margin-top:.55rem"><button class="ghost" id="clear">Clear</button><button class="warn" id="cancel">Cancel alert</button></div>
+    </div>
+    <div class="row"><button class="ghost" id="start">Start watch</button><button class="bad" id="stop">Stop watch</button></div>
+    <p class="err" id="err"></p>
+    <p class="dim">The server keeps the clock: closing this page does not stop an alert. This device is a client, not the timer.</p>
+  </div>
+</main>
+<script>
+const $=id=>document.getElementById(id), q=new URLSearchParams(location.search);
+let TOKEN=q.get("t")||localStorage.getItem("kaze_device")||"", NAME="", pin="", ws=null, lastState="", offline=false, speakAt=0;
+const BASE="/api/kaze/device";
+const D=(p,o={})=>fetch(BASE+p,{...o,headers:{"Content-Type":"application/json",Authorization:"Bearer "+TOKEN,...(o.headers||{})}}).then(async r=>({ok:r.ok,status:r.status,j:await r.json().catch(()=>({}))}));
+const cfg=()=>fetch("/api/kaze/device/profile",{headers:{Authorization:"Bearer "+TOKEN}}).then(r=>r.json()).catch(()=>({}));
+
+async function pair(){ if(!TOKEN){ $("pair").classList.remove("hide"); return false; } const p=await cfg();
+  if(!p||!p.name){ $("pair").classList.remove("hide"); $("pairerr").textContent="That token was not accepted."; return false; }
+  NAME=p.name; localStorage.setItem("kaze_device",TOKEN); $("pair").classList.add("hide"); $("app").classList.remove("hide"); $("who").textContent=NAME; openWS(); poll(); return true; }
+$("pairgo").onclick=()=>{ TOKEN=$("tok").value.trim(); $("pairerr").textContent=""; pair(); };
+
+const LABEL={idle:"Not watching",watching:"Safe. Watching.",checkin_due:"Are you safe?",alert_pending:"Alert will be sent unless you enter your PIN",alert_sent:"Alert sent"};
+function setState(s){ const L=LABEL[s.state]||s.state; $("screen").textContent=L;
+  document.body.className = s.state==="checkin_due"?"due":s.state==="alert_pending"?"alert":s.state==="alert_sent"?"help":"";
+  $("count").textContent = s.next_checkin_in!=null?`Next check-in in ${s.next_checkin_in}s`: s.respond_within!=null?`Answer within ${s.respond_within}s`: s.alert_in!=null?`Alert in ${s.alert_in}s`: s.help_on_the_way?"Help is on the way":""; }
+function maybeSpeak(s){ if(s.state==="checkin_due"&&lastState!=="checkin_due"&&Date.now()-speakAt>5000){ speakAt=Date.now(); try{ const u=new SpeechSynthesisUtterance("Are you safe?"); speechSynthesis.speak(u);}catch(e){} } lastState=s.state; }
+async function poll(){ if(!TOKEN)return; const r=await D("/state");
+  if(r.ok){ $("conn").textContent="online"; $("conn").className="pill ok"; setState(r.j); maybeSpeak(r.j); }
+  else { $("conn").textContent=r.status===503?"no connection":"error "+r.status; $("conn").className="pill bad";
+         if(r.status===503) setState({state:"idle"}); $("count").textContent=r.status===503?"(simulated: the server keeps counting)":""; }
+  setTimeout(poll,1000); }
+function openWS(){ if(ws)ws.close(); ws=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/api/kaze/ws/device?token=${encodeURIComponent(TOKEN)}`);
+  ws.onmessage=()=>{ /* any event: refresh immediately */ D("/state").then(r=>{ if(r.ok){setState(r.j);maybeSpeak(r.j);} }); };
+  ws.onclose=()=>setTimeout(()=>{ if(TOKEN)openWS(); },1500); }
+
+async function act(p,body){ const r=await D(p,{method:"POST",body:JSON.stringify(body||{})});
+  if(!r.ok&&r.status!==503){ $("err").textContent="Refused: "+(r.j.error||r.status)+(r.j.attempts_left!=null?` (${r.j.attempts_left} tries left)`:""); }
+  else $("err").textContent=""; if(r.j&&r.j.state)setState(r.j); }
+function drawPin(){ $("pinbox").textContent = pin ? "•".repeat(pin.length) : "····"; }
+["1","2","3","4","5","6","7","8","9","⌫","0"].forEach(k=>{ const b=document.createElement("button");
+  b.className="ghost"; b.textContent=k; b.onclick=()=>{ pin = k==="⌫" ? pin.slice(0,-1) : pin+k; drawPin(); }; $("pad").appendChild(b); });
+$("clear").onclick=()=>{ pin=""; drawPin(); };
+$("safe").onclick=()=>act("/checkin",{method:"tap"});
+$("cancel").onclick=()=>act("/cancel",{pin});
+$("start").onclick=()=>act("/watch/start",{});
+$("stop").onclick=()=>act("/watch/stop",{pin});
+
+if(TOKEN)$("tok").value=TOKEN; pair();
+</script></body></html>

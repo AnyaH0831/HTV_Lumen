@@ -1,0 +1,85 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>KAZE console</title>
+<style>
+:root{--ink:#0E1A24;--panel:#152634;--line:#22384A;--paper:#F3EFE6;--dim:#8FA3B0;--ok:#35C2B0;--warn:#F2B441;--bad:#F26B5B}
+*{box-sizing:border-box}body{margin:0;background:var(--ink);color:var(--paper);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;padding:.8rem 1.2rem;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(14,26,36,.95);z-index:5}
+h1{font-size:1.15rem;margin:0}h2{font-size:.95rem;color:var(--dim);margin:0 0 .6rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+main{display:grid;grid-template-columns:1.1fr 1fr;gap:1rem;padding:1rem 1.2rem 3rem}@media(max-width:1000px){main{grid-template-columns:1fr}}
+section{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:1rem}.span{grid-column:1/-1}
+input,select{font:inherit;background:#0b1620;color:var(--paper);border:1px solid var(--line);border-radius:10px;padding:.45rem .6rem}
+button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:.5rem .8rem;cursor:pointer;color:var(--ink);background:var(--ok);margin:.15rem .15rem .15rem 0}
+button.ghost{background:#25405a;color:var(--paper)}button.bad{background:var(--bad)}button.warn{background:var(--warn)}button:disabled{opacity:.4;cursor:not-allowed}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--paper);outline-offset:2px}
+.pill{display:inline-block;border-radius:999px;padding:.1rem .6rem;font-size:.8rem;font-weight:700;background:#25405a}.pill.ok{background:var(--ok);color:var(--ink)}.pill.bad{background:var(--bad);color:var(--ink)}.pill.warn{background:var(--warn);color:var(--ink)}
+.phone{border:2px solid #2d4a63;border-radius:26px;padding:1rem;max-width:21rem;background:#0b1620}.screen{font-size:1.5rem;font-weight:800;min-height:3.4rem}.dim{color:var(--dim);font-size:.85rem}
+table{border-collapse:collapse;width:100%;font-size:.85rem}td,th{border-bottom:1px solid var(--line);padding:.25rem .4rem;text-align:left;vertical-align:top}th{color:var(--dim);font-weight:600}
+tr.hidden td{background:rgba(242,107,91,.10)}.tl{max-height:22rem;overflow:auto}.chk{margin:.15rem 0}.yes{color:var(--ok)}.no{color:var(--bad)}.skip{color:var(--warn)}
+.scn{display:flex;gap:.5rem;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding:.4rem 0}.scn small{display:block;color:var(--dim)}
+.note{border-left:3px solid var(--warn);padding:.3rem .7rem;margin:.5rem 0;color:var(--dim);font-size:.85rem}
+</style></head><body>
+<header><h1>KAZE console</h1><input id="tok" type="password" placeholder="admin token" size="22" aria-label="Admin token"><button id="save">Use token</button>
+<span id="health" class="pill">health: ?</span><span id="live" class="pill">live: off</span><a href="/kaze/setup" style="color:var(--paper);font-weight:700">Laptop setup console →</a><span class="dim">Simulation only: no real message or emergency call is ever sent.</span></header>
+<main>
+<section class="span"><h2>The seven scenarios from the brief</h2><div id="scn"></div>
+ <div><button id="runall">Run all (fast)</button><button id="sweep" class="ghost">Fault-injection sweep (200 runs)</button><button id="rep" class="ghost">Honest report (real / simulated / assumed)</button></div>
+ <div id="result"></div></section>
+<section><h2>Try it yourself: simulated phone</h2>
+ <p><button id="mk">Create demo person + 3 contacts</button> <span id="who" class="dim">none yet</span></p>
+ <div class="phone"><div class="dim">Sam's phone (what an onlooker could see)</div><div id="screen" class="screen">—</div><div id="count" class="dim"></div>
+  <div><button id="start">Start watch</button><button id="tap">I'm safe (tap)</button></div>
+  <div><input id="pin" placeholder="PIN" size="8" aria-label="PIN"> <button id="pinci">Check in</button><button id="pincancel" class="warn">Cancel alert</button></div>
+  <div class="dim">Demo PINs: <button class="ghost" id="fillsafe">safe 4821</button><button class="ghost" id="fillduress">duress 9137</button></div>
+  <div><button id="off" class="ghost">Disconnect phone</button></div></div>
+ <p class="dim">Short demo timings: check-in every 10 s, 8 s to answer, 5 s grace, 6 s per contact.</p></section>
+<section><h2>Contacts (simulated phones)</h2><div id="contacts" class="dim">Create the demo person first.</div>
+ <h2 style="margin-top:1rem">Simulated messages (outbox)</h2><div class="tl"><table id="outbox"></table></div></section>
+<section class="span"><h2>Live timeline (admin view)</h2><p class="dim">Rows shaded red are hidden from the person's own device.</p><div class="tl"><table id="tl"><tr><th>time</th><th>event</th><th>detail</th></tr></table></div></section>
+</main><script>
+const $=id=>document.getElementById(id),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let ADMIN=sessionStorage.getItem("kaze_admin")||"",P=null,offline=false,ws=null;$("tok").value=ADMIN;
+const A=(p,o={})=>fetch("/api/kaze"+p,{...o,headers:{"Content-Type":"application/json","X-Admin-Token":ADMIN,...(o.headers||{})}}).then(async r=>({ok:r.ok,status:r.status,j:await r.json().catch(()=>({}))}));
+const D=(p,o={})=>fetch("/api/kaze/device"+p,{...o,headers:{"Content-Type":"application/json",Authorization:"Bearer "+P.token}}).then(async r=>({ok:r.ok,status:r.status,j:await r.json().catch(()=>({}))}));
+$("save").onclick=()=>{ADMIN=$("tok").value.trim();sessionStorage.setItem("kaze_admin",ADMIN);boot()};
+async function health(){try{const r=await fetch("/api/kaze/health");const j=await r.json();$("health").textContent="health: "+(j.ok?"ok":"DEGRADED");$("health").className="pill "+(j.ok?"ok":"bad")}catch(e){$("health").textContent="health: down";$("health").className="pill bad"}}
+function openWS(){if(ws)ws.close();ws=new WebSocket(`${location.protocol==="https:"?"wss":"ws"}://${location.host}/api/kaze/ws/admin?token=${encodeURIComponent(ADMIN)}`);
+ ws.onopen=()=>{$("live").textContent="live: on";$("live").className="pill ok"};ws.onclose=()=>{$("live").textContent="live: off";$("live").className="pill"};
+ ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==="event"&&!m.transient)addRow(m);if(m.kind==="notify")loadOutbox()}}
+function addRow(m){const p=m.payload||{},d=p.text||p.note||p.reason||(p.contact?p.contact+(p.precision?" ("+p.precision+")":""):"")||"";const tr=document.createElement("tr");
+ if(!m.vis.includes("u"))tr.className="hidden";tr.innerHTML=`<td>${new Date(m.ts*1000).toLocaleTimeString()}</td><td>${esc(m.kind)}</td><td>${esc(d).slice(0,160)}</td>`;
+ const t=$("tl");t.insertBefore(tr,t.rows[1]||null)}
+async function loadOutbox(){const r=await A("/admin/outbox?limit=30");if(!r.ok)return;$("outbox").innerHTML="<tr><th>to</th><th>message (simulated)</th><th>ok</th></tr>"+r.j.slice().reverse().map(e=>`<tr><td>${esc(e.payload.contact)}</td><td>${esc(e.payload.text)}</td><td>${e.payload.delivered?"✓":"✗ unreachable"}</td></tr>`).join("")}
+async function boot(){health();if(!ADMIN)return;const r=await A("/admin/scenarios");if(!r.ok){$("scn").innerHTML="<p class='no'>Admin token rejected.</p>";return}
+ $("scn").innerHTML=r.j.map(s=>`<div class="scn"><div><b>${esc(s.title)}</b><small>${esc(s.shows)}</small></div><div><button data-n="${s.name}" data-m="fast">Fast</button><button class="ghost" data-n="${s.name}" data-m="live">Live</button></div></div>`).join("");
+ document.querySelectorAll(".scn button").forEach(b=>b.onclick=()=>runScn(b.dataset.n,b.dataset.m,b));openWS();loadOutbox()}
+function show(r){const c=r.checks.map(c=>`<div class="chk ${c.skipped?"skip":c.ok?"yes":"no"}">${c.skipped?"–":c.ok?"✓":"✗"} ${esc(c.name)}${c.detail&&!c.ok?" <span class='dim'>("+esc(c.detail)+")</span>":""}</div>`).join("");
+ const t=r.timeline.map(x=>`<tr class="${x.hidden_from_person?"hidden":""}"><td>${x.t}s</td><td>${esc(x.person)}</td><td>${esc(x.kind)}</td><td>${esc(x.detail)}</td></tr>`).join("");
+ return `<div class="note"><b>${esc(r.title)}</b> (${r.mode}, ${r.elapsed_real_s}s) — <span class="pill ${r.passed?"ok":"bad"}">${r.passed?"all checks passed":"FAILED"}</span><br>${esc(r.shows)}</div>${c}
+ <details><summary>Timeline (${r.timeline.length} events)</summary><div class="tl"><table><tr><th>t</th><th>person</th><th>event</th><th>detail</th></tr>${t}</table></div></details>
+ <details><summary>Simulated · assumed · needs validation</summary><p class="dim"><b>Simulated:</b> ${r.simulated.map(esc).join(" ")}<br><b>Assumed:</b> ${r.assumptions.map(esc).join(" ")}<br><b>Needs validation:</b> ${r.needs_validation.map(esc).join(" ")}</p></details>`}
+async function runScn(n,m,btn){btn.disabled=true;$("result").innerHTML=`<p class="dim">Running ${esc(n)} (${m})${m==="live"?" in real time, watch the timeline below…":"…"}</p>`;const r=await A(`/admin/scenarios/${n}/run?mode=${m}`,{method:"POST"});btn.disabled=false;$("result").innerHTML=r.ok?show(r.j):`<p class="no">Error ${r.status}</p>`}
+$("runall").onclick=async()=>{$("result").innerHTML="<p class='dim'>Running all seven…</p>";const l=await A("/admin/scenarios");let h="";for(const s of l.j){const r=await A(`/admin/scenarios/${s.name}/run?mode=fast`,{method:"POST"});h+=show(r.j)+"<hr>"}$("result").innerHTML=h}
+$("sweep").onclick=async()=>{$("result").innerHTML="<p class='dim'>Simulating 200 unresponsive and 200 forgetful people…</p>";const r=await A("/admin/sweep?n=200",{method:"POST"});$("result").innerHTML="<pre class='dim' style='white-space:pre-wrap'>"+esc(JSON.stringify(r.j,null,2))+"</pre>"}
+$("rep").onclick=async()=>{$("result").innerHTML="<p class='dim'>Building the report…</p>";const r=await A("/admin/report");const j=r.j;const li=a=>"<ul>"+a.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ul>";
+ $("result").innerHTML=`<h2>Scenario results</h2>${li(j.summary.map(s=>`${s.title}: ${s.passed?"PASS":"FAIL"} (${s.checks})`))}<h2>What the prototype actually demonstrates</h2>${li(j.what_the_prototype_actually_demonstrates)}<h2>What is simulated</h2>${li(j.what_is_simulated)}<h2>Assumptions</h2>${li(j.assumptions)}<h2>Needs further validation</h2>${li(j.needs_further_validation)}<h2>Not yet connected</h2>${li(j.not_yet_connected)}`}
+$("mk").onclick=async()=>{const r=await A("/admin/users",{method:"POST",body:JSON.stringify({name:"Sam",safe_pin:"4821",duress_pin:"9137",preset:"demo",contacts:[{name:"Alex",permissions:{location:"precise",can_resolve:true}},{name:"Bo",permissions:{location:"coarse"}},{name:"Cy",permissions:{location:"none"}}]})});
+ if(!r.ok){alert("Could not create: "+JSON.stringify(r.j));return}P={id:r.j.user_id,token:r.j.device_token,contacts:r.j.contacts};$("who").textContent="Sam (id "+P.id+")";drawContacts();poll()}
+function drawContacts(){$("contacts").innerHTML=P.contacts.map(c=>`<div class="scn"><div><b>${esc(c.name)}</b></div><div><button class="ghost" data-c="${c.id}" data-a="unreach">Unreachable: off</button><button data-c="${c.id}" data-a="open">Open alert page</button><button class="warn" data-c="${c.id}" data-a="ack">Acknowledge</button><button class="bad" data-c="${c.id}" data-a="res">Resolve</button></div></div>`).join("");
+ document.querySelectorAll("#contacts button").forEach(b=>b.onclick=()=>contactAct(b))}
+const unreach={};
+async function contactAct(b){const cid=b.dataset.c,a=b.dataset.a;
+ if(a==="unreach"){unreach[cid]=!unreach[cid];await A("/admin/sim/unreachable",{method:"POST",body:JSON.stringify({contact_id:cid,unreachable:unreach[cid]})});b.textContent="Unreachable: "+(unreach[cid]?"ON":"off");return}
+ const ss=await A("/admin/sessions/"+P.id);const sid=ss.j.find(s=>s.status!=="RESOLVED")?.id||ss.j[0]?.id;if(!sid){alert("No session yet");return}
+ const ls=await A("/admin/links/"+sid);const l=ls.j.find(x=>x.contact_id===cid);if(!l)return;
+ if(a==="open"){window.open(l.url,"_blank");return}
+ const r=await fetch(`/api/kaze/contact/${l.token}/${a==="ack"?"ack":"resolve"}`,{method:"POST",headers:{"Content-Type":"application/json"},body:a==="res"?JSON.stringify({reason:"false_alarm"}):"{}"});
+ if(!r.ok){const j=await r.json().catch(()=>({}));alert("Refused: "+(j.error||r.status))}}
+const LABEL={idle:"Not watching",watching:"Safe. Watching.",checkin_due:"Check-in: are you safe?",alert_pending:"Alert will be sent unless you enter your PIN",alert_sent:"Alert sent"};
+async function poll(){if(!P)return;const r=await D("/state");if(r.ok){const s=r.j;$("screen").textContent=LABEL[s.state]||s.state;
+ $("count").textContent=s.next_checkin_in!=null?`next check-in in ${s.next_checkin_in} s`:s.respond_within!=null?`respond within ${s.respond_within} s`:s.alert_in!=null?`alert in ${s.alert_in} s`:s.help_on_the_way?"help is on the way":""}
+ else{$("screen").textContent=r.status===503?"No connection":"error "+r.status;$("count").textContent=r.status===503?"(simulated disconnect: the server keeps counting)":""}setTimeout(poll,1000)}
+async function act(p,body){const r=await D(p,{method:"POST",body:JSON.stringify(body||{})});if(!r.ok&&r.status!==503)$("count").textContent="refused: "+(r.j.error||r.status)+(r.j.attempts_left!=null?" ("+r.j.attempts_left+" tries left)":"")}
+$("start").onclick=()=>act("/watch/start");$("tap").onclick=()=>act("/checkin",{method:"tap"});$("pinci").onclick=()=>act("/checkin",{method:"pin",pin:$("pin").value});$("pincancel").onclick=()=>act("/cancel",{pin:$("pin").value});
+$("fillsafe").onclick=()=>$("pin").value="4821";$("fillduress").onclick=()=>$("pin").value="9137";
+$("off").onclick=async()=>{offline=!offline;await A("/admin/sim/offline",{method:"POST",body:JSON.stringify({user_id:P.id,offline})});$("off").textContent=offline?"Reconnect phone":"Disconnect phone"};
+setInterval(health,5000);boot();
+</script></body></html>

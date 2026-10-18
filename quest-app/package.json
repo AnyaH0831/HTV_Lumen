@@ -1,0 +1,2 @@
+{ "name": "lumen-quest", "private": true, "type": "module",
+  "scripts": { "test": "node tests/features.test.mjs && node tests/segmenter.test.mjs && node tests/coach.test.mjs && node tests/recorder.test.mjs && node tests/assist.test.mjs && node tests/chat.test.mjs && node --import ./tests/stubs/register.mjs tests/ui_smoke.test.mjs && node --import ./tests/stubs/register_card.mjs tests/ui_card_smoke.test.mjs" } }

@@ -1,0 +1,23 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+data/quest/*.jsonl
+data/quest/progress.json
+data/remote_quest_*/
+data/*.npz
+data/public/*.npz
+runs/
+quest-app/models/
+quest-app/models_*/
+quest-app/vendor/
+quest-app/**/*.cdn.bak
+server/static/audio/
+data/server.sqlite
+# Generated runtime secrets/DB (never commit; the server regenerates them)
+data/kaze.sqlite
+data/kaze.sqlite-shm
+data/kaze.sqlite-wal
+data/kaze_admin_token.txt
+data/kaze_secret.txt
+*.zip
