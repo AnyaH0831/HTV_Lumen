@@ -6,8 +6,8 @@ turns the confirmed words into clinic-intake actions through **MCP tools**.
 
 > **This README is a living document.** It records not just *what* the code does but *why* files exist,
 > what was decided and rejected, and what went wrong along the way. The **work-order status** and
-> **decisions / challenges** sections below are updated as work lands. Last updated: the six-item work
-> order on autonomy, the laptop KAZE console, cloud/Tiger Data, SMS notifications and this doc.
+> **decisions / challenges** sections below are updated as work lands. Last updated: the Quest KAZE
+> check-in overlay and its 60-second response window, live Vultr/Tiger Data verification, and this doc.
 
 Two rules the code enforces, not just the prompts:
 
@@ -25,44 +25,61 @@ Two rules the code enforces, not just the prompts:
 | # | Ask | Status | Where |
 |---|---|---|---|
 | 1 | Sign→voice automation is naggy/slow; improve it; recommend ML work | **Done (code+docs, needs real-hardware eval)** | `LUMEN_AUTONOMY=fast`, `server/policy.py`, `docs/AUTONOMY.md` |
-| 2 | Laptop website that syncs with the headset, configurable check-in times, laptop-driven capture | **Done for KAZE (browser console + device client)** | `/kaze/setup`, `/kaze/device`, `docs/KAZE.md` §4a/4b |
-| 3 | Cloud is not implemented | **Code path + runbook ready; needs your Vultr host + Tiger Data URL to actually run** | `deploy/`, `docs/KAZE.md` §5, `KAZE_DB_URL` |
-| 4 | Is Tiger Data used? | **Now real: Postgres/TimescaleDB is a first-class path** | `server/kaze/db.py`, `KAZE_TIMESCALE` |
+| 2 | Lumen laptop website that syncs with the headset, configurable check-ins, laptop-driven capture | **Done for Lumen's KAZE challenge implementation (browser console + device client)** | `/kaze/setup`, `/kaze/device`, `docs/KAZE.md` §4a/4b |
+| 3 | Cloud is not implemented | **Running on Vultr; live health checked** | `deploy/`, `https://155.138.210.93.sslip.io/api/health` |
+| 4 | Is Tiger Data used? | **Yes: Lumen's live KAZE challenge feature uses Tiger Data Postgres; health reports a Timescale hypertable** | `server/kaze/db.py`, `KAZE_DB_URL`, `KAZE_TIMESCALE` |
 | 5 | Emergency contact + SMS; where does my number go? | **Done; free path (Telegram/ntfy) or Twilio; honest dry run with none** | `server/notify.py`, `docs/NOTIFICATIONS.md`, `.env` |
 | 6 | Document everything in the README as a live doc | **This file** | you are here |
 
-Remaining items need **hardware or accounts** you hold (a real Quest, signer recordings, a Vultr host,
-a Tiger Data URL, a Telegram/Twilio account). Those are listed under **Outstanding and blocked items**.
+Remaining items need **hardware, data, or accounts** you hold (a real Quest, signer recordings, and a
+configured notification account for real alerts). Those are listed under **Outstanding and blocked items**.
 
 ## Architecture
 
+### Agent flow and tool loops
+
+The model on the Quest recognises signs; the server-side agent works on the confirmed glosses. The
+planner can choose and call MCP tools, but the policy and tool implementations enforce speech and alert
+approvals in code.
+
+```mermaid
+flowchart TD
+    A[Quest: WebXR hands] --> B[Segment one sign]
+    B --> C[On-device ONNX classifier]
+    C -->|reject / ask sign again| B
+    C -->|confirmed glosses over WebSocket| D[Server gathers phrase]
+    D -->|pause / finished| E[Normalize: Gemini]
+    E -->|unavailable or failure| F[Rule normalizer]
+    E --> G[Code policy gate]
+    F --> G
+    G -->|too uncertain| H[Ask signer to repeat]
+    H --> B
+    G -->|clear phrase| I[Planner: Anthropic / Gemini / offline]
+    G -->|risky phrase| I
+    I <-->|list tools, call tool, inspect result| J[MCP tool server]
+    J --> K{Code-enforced action}
+    K -->|speak phrase| L[Countdown; signer may cancel]
+    K -->|read-back required| M[Speak read-back; signer approves?]
+    M -->|no / timeout| N[Stop without action]
+    M -->|yes| L
+    L -->|cancel| N
+    L -->|not cancelled| O[Save intake / allergy as applicable]
+    O --> P{EMERGENCY or HELP?}
+    P -->|no| Q[Done]
+    P -->|yes| R[Ask separate SMS approval]
+    R -->|no / timeout| Q
+    R -->|yes| S[notify_contact: configured delivery or explicit dry run]
+    S --> Q
+    I -. before any tool acts, provider failure .-> T[Offline planner fallback]
+    T --> J
+    I -. after a tool acts, failure .-> U[Stop; do not replay actions]
 ```
-Quest 3S browser (WebXR hand tracking: 25 joint spaces -> 21 MediaPipe joints/hand, both hands)
-  segmenter.js  -> clip (one sign)            features.js  -> [48,152] (bit-exact with Python, tested)
-  classifier.js -> ONNX Runtime Web (wasm), softmax(logits/T) baked in -> auto-accept | ask "did you sign X?" | reject
-        | confirmed glosses over WebSocket (/ws)
-FastAPI (server/app.py) --in-process--> MCP server (server/mcp_server.py)  <-- also runnable over stdio (Claude Desktop etc.)
-  tools: get_signed_phrase, submit_intake, flag_allergy, request_confirmation, speak_to_clinician, notify_contact
-Orchestrator (server/orchestrator.py): normalize -> plan -> confirm -> act, one stage at a time,
-  each stage broadcast as {type:'stage'} so the dashboard shows where the phrase is.
-  normalize (server/normalize.py): Gemini turns the gloss stream into ONE plain-English sentence
-    (dedupes repeats, guards in code), rule fallback with no key.
-  policy (server/policy.py, decided in code): speak a clear phrase after a countdown, ask for a read-back
-    when a mistake would be costly, or ask the signer to sign again when too unsure.
-    LUMEN_AUTONOMY=fast (default) / tiered controls HOW MUCH still asks.
-  plan (server/agent.py): anthropic | gemini | offline planner, offline fallback.
-  confirm: a risky phrase's read-back is SPOKEN (server/tts.py: ElevenLabs, else browser speech) before the
-    signer answers; a clear phrase is spoken directly and can be cancelled during the countdown.
-  act: notify_contact -> server/notify.py (twilio | telegram | ntfy | webhook | dry-run).
-Clinician dashboard at /dashboard: the two-sided conversation in the middle -- what the signer said on the
-  right, what the clinician said on the left -- with the agent trace beside it and the confirmed
-  signs (plus a no-headset test box) on the left. Clinician speech comes from
-  a microphone (the server's own, or the browser's mic streamed to the server, via ENABLE_CAPTIONS=1 +
-  faster-whisper), the browser mic button, or typing; every line is
-  also fed back into normalize as context.
-KAZE (safety timer + duress): /kaze/setup (laptop console) <-> /kaze/device (headset/phone client),
-  server-authoritative, escalates to contacts; see Project KAZE below.
-```
+
+The LLM planner loop is bounded to eight tool rounds. If a planner fails before it calls a tool, the
+pipeline can retry or fall back to the deterministic offline planner. If it fails after a tool call, the
+pipeline stops instead of restarting and risking duplicate actions. Gemini requests also pass through a
+serialized retry and circuit-breaker gate. The separate “are you finished?” check can reuse the cached
+normalization result for the same phrase.
 
 ## Project layout
 
@@ -110,7 +127,7 @@ server/
   captions.py      optional clinician captions: energy VAD + faster-whisper (server mic or browser audio)
   notify.py        outbound SMS/push: twilio | telegram | ntfy | webhook, else honest dry-run (docs/NOTIFICATIONS.md)
   static/          dashboard.html (+ audio/ for generated mp3s)
-  kaze/            Project KAZE: server-authoritative safety timer + duress (see docs/KAZE.md)
+  kaze/            Lumen's KAZE challenge implementation: server-authoritative check-in timer + duress (see docs/KAZE.md)
     static/console.html   scenario demo console (/kaze)
     static/setup.html     laptop operator console (/kaze/setup)  <- item 2
     static/device.html    headset/phone device client (/kaze/device)  <- item 2
@@ -138,13 +155,38 @@ The repo as-is contains one demo model trained on a single signer's recordings
 
 ## Tech stack
 
-| Layer | What |
-|---|---|
-| Headset app | Vanilla JS ES modules (no build step), Three.js 0.160, ONNX Runtime Web 1.18 (wasm), WebXR `hand-tracking` feature, WebSocket |
-| Server | Python >=3.10, FastAPI, uvicorn, websockets, MCP (`mcp` 1.x — 2.x renamed `FastMCP`), sqlite3 or Postgres (event log) |
-| ML | PyTorch, ONNX (opset 17), onnxruntime, numpy, matplotlib (plots), pandas+pyarrow (Kaggle prep only), yaml |
-| Optional keys | `anthropic` (LLM provider), `google-genai` (normalizer / planner), `faster-whisper`+`sounddevice` (captions), ElevenLabs (TTS), Twilio/Telegram/ntfy (notifications), httpx |
-| Tests | pytest (ml + server), node/npm (quest-app parity + smoke) |
+| Layer | Technology in this project | Why it is used |
+|---|---|---|
+| Headset UI and rendering | Browser JavaScript ES modules, WebXR hand tracking, Three.js 0.160 | Runs directly in the Quest browser without a native headset build; Three.js draws the hand-facing panels and buttons in XR. |
+| On-headset recognition | ONNX Runtime Web 1.18 with WASM; exported ONNX model | Runs the sign classifier locally on the Quest, so live recognition does not upload camera video or joint streams. |
+| Headset ↔ server | WebSocket for live glosses and status; HTTP/JSON for recordings and APIs | Streams short recognized words and lets the server send pipeline/check-in updates back to clients. Raw joint clips are sent only in recording mode. |
+| Web server | Python 3, FastAPI, Uvicorn, WebSockets, PyYAML | Serves the headset app and clinician dashboard, accepts API/WebSocket traffic, and hosts the pipeline. |
+| Agent tool interface | MCP Python SDK 1.x (`FastMCP`); in-process session for the web app, stdio transport for standalone clients | Gives planners a bounded set of typed application actions. LLMs call the same tools as the deterministic offline planner. |
+| Phrase interpreter | Gemini through `google-genai`, with a local rule normalizer fallback | Turns glosses into a short sentence when configured; the rule path keeps the app usable without network access or an API key. |
+| Planner | Anthropic, Gemini, or deterministic offline planner | Chooses among the MCP tools. The offline planner makes a predictable no-provider path; provider failures before acting can fall back to it. |
+| Code safety gates | `server/policy.py` and guarded MCP tools | Keeps repeat, read-back, cancellation, and separate message approval decisions in code rather than delegating them to an LLM. |
+| Model development | PyTorch, NumPy, ONNX, onnxruntime; pandas/pyarrow for public-data preparation | Trains/evaluates the model on development machines and exports the artifact the headset runs. Training dependencies are not needed for normal serving. |
+| Lumen check-in storage | SQLite adapter for local/default runs; PostgreSQL via `psycopg[binary]` for the live Tiger Data service; TimescaleDB extension when available | Persists Lumen check-in users, sessions, events, and location samples. The live service uses Tiger Data Postgres. |
+| Lumen event log | Python standard-library SQLite | Small append-only log of phrases and clinician captions; it is separate from KAZE’s database. |
+| Hosting | Vultr Linux VM, systemd, Caddy HTTPS | Keeps the Python server running and provides HTTPS required by WebXR in the Quest browser. |
+| Optional integrations | ElevenLabs TTS; faster-whisper and sounddevice for captions; Twilio, Telegram, ntfy, or webhook for alerts | Adds hosted speech, server/browser microphone captions, and external notifications when credentials are configured. |
+| Browser assets | Three.js and ONNX Runtime Web; `make vendor` copies them into `quest-app/vendor/` | Lets the headset load rendering and inference dependencies from the Lumen server at offline venues. |
+| Checks | pytest and Node.js tests | Covers Python policy/pipeline/KAZE logic and JavaScript feature parity and UI behavior. |
+
+## Databases and persisted data
+
+There are two separate databases in the live deployment:
+
+| Store | What it contains | Current use |
+|---|---|---|
+| **Tiger Data (managed PostgreSQL + TimescaleDB)** | KAZE people, check-in sessions, append-only KAZE events, and location samples | **Active for KAZE on Vultr.** The live KAZE health endpoint reported `PostgresDB`, database reachable, and `timescale: hypertable` on 2026-10-18. `KAZE_DB_URL` selects Postgres and `KAZE_TIMESCALE=1` enables the hypertable setup. |
+| **SQLite: `server.sqlite`** | Lumen’s small append-only application event log, including phrase and clinician-caption events | **Active for the Lumen app on Vultr**, at `/var/lib/lumen/server.sqlite` (`SIGNBRIDGE_DATA/server.sqlite`). It is not the KAZE store. |
+| **SQLite KAZE fallback** | The same KAZE record types as above | Used for local/default runs when neither `KAZE_DB_URL` nor `DATABASE_URL` is set, and in tests. The live Vultr instance is configured for PostgreSQL, so it does not use this fallback. |
+| **Files, not a database** | Quest recordings (`quest/*.jsonl`), recording progress (`progress.json`), prepared datasets (`.npz`), and model artifacts (`.onnx`, JSON metadata) | Kept as files under the configured data/model directories. Training data and model files are not stored in Tiger Data. |
+
+The live database status was checked without exposing the connection string. The health check confirms the
+Postgres connection and hypertable; it does not mean the Lumen phrase log or training files moved into
+PostgreSQL.
 
 ## Quick start (laptop, no headset needed)
 
@@ -260,7 +302,7 @@ and clinician input; and the agent trace. Clinician speech: `ENABLE_CAPTIONS=1` 
 browser's mic streamed to the server's faster-whisper), the browser's own speech recognition, or typing —
 each line is stored and handed to the normalizer as context only.
 
-## Project KAZE (safety timer + duress)
+## Lumen's KAZE challenge implementation (safety check-ins + duress)
 
 `server/kaze/` is a **server-authoritative check-in timer**: a person starts a watch, misses a scheduled
 check-in, and the server escalates to trusted contacts on its own. A second "duress" PIN looks identical on
@@ -277,8 +319,9 @@ device and never claims to detect incapacitation.
   - `/kaze/c/<token>` — the one-alert page a trusted contact opens.
 - Mounted at `/api/kaze/*`; also runs stand-alone with `uvicorn server.kaze.app:app`. `KAZE_ENABLED=0`
   leaves it out.
-- Storage is SQLite by default, or Postgres / Tiger Data when `KAZE_DB_URL` is set (a TimescaleDB hypertable
-  is created when available). `psycopg[binary]` is in `server/requirements.txt`.
+- Storage: local/test KAZE defaults to SQLite; the live Vultr KAZE service uses Tiger Data PostgreSQL
+  with its events table verified as a TimescaleDB hypertable. Lumen's separate `server.sqlite` event log
+  remains SQLite. See **Databases and persisted data** above.
 - Seven machine-checked scenarios and a fault-injection sweep (`POST /api/kaze/admin/scenarios/<name>/run`,
   `POST /api/kaze/admin/sweep`, or `scripts/kaze_sweep.py`).
 - Delivery: with no notification backend set it is a **simulation** (every message logged); with one set,
@@ -342,7 +385,7 @@ public-data pretraining actually helps held-out Quest signers before spending mo
 | `NOTIFY_WEBHOOK_URL`, `NOTIFY_TIMEOUT_S` | —, `10` | generic JSON webhook |
 | `ENABLE_CAPTIONS`, `WHISPER_MODEL`, `VAD_RMS` | —, `base.en`, `0.015` | clinician captions (server mic, or a browser mic streamed to the server) |
 | `SIGNBRIDGE_DATA` | `./data` | where recordings, npz and the sqlite log live |
-| `KAZE_ENABLED` | `1` | `0` = do not mount Project KAZE in the Lumen app |
+| `KAZE_ENABLED` | `1` | `0` = disable Lumen's KAZE challenge feature |
 | `KAZE_DB_URL` / `DATABASE_URL` | sqlite under `SIGNBRIDGE_DATA` | `sqlite:///…` or `postgresql://…` (Tiger Data / TimescaleDB) |
 | `KAZE_TIMESCALE` | `1` | `0` = never try to create a TimescaleDB hypertable |
 | `KAZE_ADMIN_TOKEN`, `KAZE_SECRET`, `KAZE_BASE_URL` | generated files, `http://localhost:8000` | KAZE admin token, contact-link HMAC key, public URL for links |
@@ -408,7 +451,7 @@ public-data pretraining actually helps held-out Quest signers before spending mo
 | Metrics (ECE, temperature scaling, risk-coverage, AUROC) unit-tested | `prepare_google_asl.py` on the real Kaggle files |
 | Policy: fast mode speaks non-critical doubt, tiered asks, critical-weak asks, `notify_contact` blocked in code (`test_policy.py`, `test_agent_flow.py`) | Real-hardware evaluation of the policy (scripted scenarios with known meanings) |
 | Notifier: dry run with nothing configured, first-configured-wins, `send_message` approval required (`test_notify.py`) | A real Telegram/ntfy/Twilio round trip (bring keys) |
-| KAZE engine: states, PIN/duress, escalation, restart recovery, privacy; pages served; operator list/patch/rotate (`test_kaze*.py`) | KAZE on real Postgres, real delivery, and any real user testing |
+| Lumen's KAZE challenge feature: states, PIN/duress, escalation, restart recovery, privacy; pages served; operator list/patch/rotate (`test_kaze*.py`) | KAZE challenge behavior with real users and real alert delivery |
 | Normalizer: rule pass invents nothing; a >=0.7-confidence gloss can never be dropped | Gemini normalizer on real signing (needs a key) |
 | **Sign descriptions and photos**: drafts from general knowledge, not checked by a signer | |
 
@@ -427,13 +470,10 @@ full list.
 2. **Sign-guide verification**: every description is still `verified: false`; a fluent signer must approve.
 3. **Signer recordings**: LOSO needs >= 4 signers, 10+ reps/sign; the repo has one demo signer.
 4. **Background negatives** and retraining, then tune `?tent=`/`?bg=` on real idle time.
-5. **Cloud (item 3/4)**: give us a **Vultr host** and a **Tiger Data connection string** and we set
-   `KAZE_DB_URL` + `KAZE_TIMESCALE=1` and run the scenarios/sweep against the real cluster. The code and
-   runbook are ready (`deploy/`, `docs/KAZE.md` §5).
-6. **Real alerts (item 5)**: adopt Telegram or ntfy (free) or provide Twilio credentials, then put
-   `EMERGENCY_CONTACT` + the backend keys in `.env` (`docs/NOTIFICATIONS.md`). The in-XR KAZE check-in
-   overlay inside the Lumen Quest app (beyond the `/kaze/device` browser page) is a stretch goal.
-7. **Unrun integrations**: Gemini planner/normalizer, ElevenLabs, Whisper captions, the Google-ISLR
+5. **Real alerts (item 5)**: adopt Telegram or ntfy (free) or provide Twilio credentials, then put
+   `EMERGENCY_CONTACT` + the backend keys in `.env` (`docs/NOTIFICATIONS.md`). The Quest check-in overlay
+   is implemented; a real external delivery backend and real-person validation are still outstanding.
+6. **Unrun integrations**: Gemini planner/normalizer, ElevenLabs, Whisper captions, the Google-ISLR
    converter on the real download, and `make vendor` against real npm.
-8. **Research/admin**: whether this becomes a paper (needs a literature search, ethics approval, Deaf
+7. **Research/admin**: whether this becomes a paper (needs a literature search, ethics approval, Deaf
    co-design), Hack the Valley prior-work disclosure, and a Lumen trademark/domain check.
